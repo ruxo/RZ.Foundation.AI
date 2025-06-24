@@ -1,0 +1,15 @@
+obj/
+bin/
+publish/
+femto/
+/src/Reservation.Api/keys/
+.idea/
+/src/AIService/node/src/
+node_modules/
+/src/Cosy.UI/wwwroot/app.min.css
+appsettings.*.json
+http-client.env.json
+*.private.env.json
+/*.sln*.DotSettings.user
+Core.http
+.env

@@ -1,0 +1,34 @@
+= AI Foundation
+
+== Support
+
+* Open AI
+* Gemini AI (without tool calling)
+
+== Usages
+
+=== Simple
+
+[source,csharp]
+----
+using RZ.Foundation.AI;
+
+var chat = new OpenAi("(api key)").CreateModel(OpenAi.gpt_4o_mini);
+
+// or using Gemini AI
+// var chat = new GeminiAi("(api key)").CreateModel(GeminiAi.gemini_20_flash);
+
+var message = new ChatMessage.Content(ChatRole.User, "Hello");
+var (response, cost) = await chat([message]);
+
+Console.WriteLine($"Chat cost = {cost}");
+foreach(var entry in response)
+    Console.WriteLine($"\t{entry}");
+
+var history = [message].Concat(response);
+
+message = new ChatMessage.Content(ChatRole.User, "How are you?");
+(response, cost) = await chat(history.Append(message));
+
+history = [message].Concat(response);
+----

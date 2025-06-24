@@ -1,0 +1,16 @@
+﻿<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.6" />
+    <PackageVersion Include="MinVer" Version="6.0.0" />
+    <PackageVersion Include="OpenAI" Version="2.2.0-beta.4" />
+    <PackageVersion Include="Google_GenerativeAI" Version="2.7.0" />
+    <PackageVersion Include="RZ.Foundation" Version="7.0.5" />
+    <PackageVersion Include="RZ.Foundation.Validation" Version="0.1.0" />
+  </ItemGroup>
+</Project>
