@@ -8,4 +8,7 @@
   <Folder Name="/src/">
     <Project Path="src\RZ.Foundation.AI\RZ.Foundation.AI.csproj" Type="Classic C#" />
   </Folder>
+  <Folder Name="/test/">
+    <Project Path="test\FoundationAITests\FoundationAITests.csproj" Type="Classic C#" />
+  </Folder>
 </Solution>

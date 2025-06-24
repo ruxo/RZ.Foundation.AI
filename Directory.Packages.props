@@ -12,5 +12,14 @@
     <PackageVersion Include="Google_GenerativeAI" Version="2.7.0" />
     <PackageVersion Include="RZ.Foundation" Version="7.0.5" />
     <PackageVersion Include="RZ.Foundation.Validation" Version="0.1.0" />
+
+      <!-- Test -->
+      <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+      <PackageVersion Include="RZ.Foundation.Testing" Version="7.0.7" />
+      <PackageVersion Include="xunit.v3" Version="2.0.3" />
+      <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.1">
+          <PrivateAssets>all</PrivateAssets>
+          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageVersion>
   </ItemGroup>
 </Project>

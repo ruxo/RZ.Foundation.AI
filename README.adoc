@@ -1,13 +1,33 @@
 = AI Foundation
 
+== Overview
+
+This library provides a unified interface for interacting with different AI services.
+
 == Support
 
 * Open AI
 * Gemini AI (without tool calling)
 
+== Features
+
+* Simple chat interface
+* Support for chat history
+* Cost tracking for AI requests
+* Multiple model support
+
+== Installation
+
+Add the NuGet package:
+
+[source]
+----
+dotnet add package RZ.Foundation.AI
+----
+
 == Usages
 
-=== Simple
+=== Simple Chat Example
 
 [source,csharp]
 ----
@@ -30,5 +50,31 @@ var history = [message].Concat(response);
 message = new ChatMessage.Content(ChatRole.User, "How are you?");
 (response, cost) = await chat(history.Append(message));
 
-history = [message].Concat(response);
+history = history.Concat(response);
+----
+
+=== Chat with Tools
+
+[source,csharp]
+----
+using RZ.Foundation.AI;
+
+static class SampleTool
+{
+    [AiToolName("add_two_numbers")]
+    public static int Add(int a, int b) => a + b;
+}
+
+var chat = new OpenAi("(api key)").CreateModel(OpenAi.gpt_4o_mini);
+
+// or using Gemini AI
+// var chat = new GeminiAi("(api key)").CreateModel(GeminiAi.gemini_20_flash);
+
+var tools = ToolWrapper.FromType(typeof(SampleTool));
+
+var resolver = LLM.CreateResolver(chat, tools);
+
+var message = new ChatMessage.Content(ChatRole.User, "Calculate 123 + 456 using the provided tool");
+var (response, cost) = await resolver([message]);
+// simply use `resolver` just like using `chat`
 ----
