@@ -11,18 +11,18 @@ public delegate AgentResponse OpenAiFunc(IEnumerable<ChatMessage> messages, Chat
 [PublicAPI]
 public class OpenAi(string apiKey, TimeProvider? clock = null)
 {
-    public const string gpt_4o_mini = "gpt-4o-mini";
-    public const string gpt_41_mini = "gpt-4.1-mini";
-    public const string gpt_41_nano = "gpt-4.1-nano";
-    public const string gpt_4o = "gpt-4o";
-    public const string gpt_41 = "gpt-4.1";
+    public const string GPT_4O_MINI = "gpt-4o-mini";
+    public const string GPT_41_MINI = "gpt-4.1-mini";
+    public const string GPT_41_NANO = "gpt-4.1-nano";
+    public const string GPT_4O = "gpt-4o";
+    public const string GPT_41 = "gpt-4.1";
 
     static readonly Map<string, CostStructure> RateTable = LanguageExt.Prelude.Map(
-            (gpt_4o_mini, CostStructure.Simple(0.15m, 0.6m)),
-            (gpt_41_mini, CostStructure.Simple(0.4m, 1.6m)),
-            (gpt_41_nano, CostStructure.Simple(0.1m, 0.4m)),
-            (gpt_4o, CostStructure.Simple(2.5m, 10m)),
-            (gpt_41, CostStructure.Simple(2m, 8m))
+            (GPT_4O_MINI, CostStructure.Simple(0.15m, 0.6m)),
+            (GPT_41_MINI, CostStructure.Simple(0.4m, 1.6m)),
+            (GPT_41_NANO, CostStructure.Simple(0.1m, 0.4m)),
+            (GPT_4O, CostStructure.Simple(2.5m, 10m)),
+            (GPT_41, CostStructure.Simple(2m, 8m))
         );
 
     public static bool IsModelSupported(string model)
@@ -45,7 +45,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
             var result = ReadResult(clock ?? TimeProvider.System, getCost, completion).ToArray();
             return (result, cost);
 
-            ChatCost getCost() => entryIndex++ == 0? cost : ChatCost.Zero;
+            ChatCost getCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;
         };
 
         async ValueTask<Option<OpenAI.Chat.ChatMessage>> Convert(ChatMessage cm)
@@ -99,10 +99,9 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
 
     static OpenAI.Chat.ChatMessage? ToChatMessage(ChatMessage.Content entry)
         => entry.Role switch {
-            ChatRole.Agent     => new AssistantChatMessage(entry.Message),
-            ChatRole.System    => new SystemChatMessage(entry.Message),
-            ChatRole.User      => new UserChatMessage(entry.Message),
-            ChatRole.Developer => new DeveloperChatMessage(entry.Message),
+            ChatRole.Agent                      => new AssistantChatMessage(entry.Message),
+            ChatRole.System                     => new SystemChatMessage(entry.Message),
+            ChatRole.User or ChatRole.Developer => new UserChatMessage(entry.Message),
 
             ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => null,
 
@@ -112,12 +111,11 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         };
 
     static async Task<OpenAI.Chat.ChatMessage?> ToChatMessage(HttpClient http, ChatMessage.MultiContent entry) {
-        var parts = await entry.Message.MapAsync(async x => await CreatePart(http, x)).ToArrayAsync();
+        var parts = await entry.Messages.MapAsync(async x => await CreatePart(http, x)).ToArrayAsync();
         return entry.Role switch {
-            ChatRole.Agent     => new AssistantChatMessage(parts),
-            ChatRole.System    => new SystemChatMessage(parts),
-            ChatRole.User      => new UserChatMessage(parts),
-            ChatRole.Developer => new DeveloperChatMessage(parts),
+            ChatRole.Agent                      => new AssistantChatMessage(parts),
+            ChatRole.System                     => new SystemChatMessage(parts),
+            ChatRole.User or ChatRole.Developer => new UserChatMessage(parts),
 
             ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => null,
 
@@ -130,25 +128,15 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
     static async ValueTask<ChatMessageContentPart> CreatePart(HttpClient http, ContentType ct)
         => ct switch {
             ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Content),
-            ContentType.Image m => CreateImagePart((m.MediaType, m.Content)),
-            ContentType.Audio m => CreateAudioPart((m.MediaType, m.Content)),
-            ContentType.File m  => CreateFilePart(m.FileName, (m.MediaType, m.Content)),
+            ContentType.Image m => CreateImagePart((m.MediaType, m.Data)),
 
             ContentType.ImageUri m => CreateImagePart(await m.Request.Retrieve(http)),
-            ContentType.AudioUri m => CreateAudioPart(await m.Request.Retrieve(http)),
-            ContentType.FileUri m  => CreateFilePart(m.FileName, await m.Request.Retrieve(http)),
 
             _ => throw new NotSupportedException($"Unknown content type: {ct.GetType().Name}")
         };
 
     static ChatMessageContentPart CreateImagePart((string MediaType, byte[] Data) data)
         => ChatMessageContentPart.CreateImagePart(BinaryData.FromBytes(data.Data), data.MediaType);
-
-    static ChatMessageContentPart CreateAudioPart((string MediaType, byte[] Data) data)
-        => ChatMessageContentPart.CreateInputAudioPart(BinaryData.FromBytes(data.Data), new ChatInputAudioFormat(data.MediaType));
-
-    static ChatMessageContentPart CreateFilePart(string fileName, (string MediaType, byte[] Data) data)
-        => ChatMessageContentPart.CreateFilePart(BinaryData.FromBytes(data.Data), data.MediaType, fileName);
 
     static AssistantChatMessage ToChatMessage(ChatMessage.ToolCall tc)
         => new(from t in tc.Requests
@@ -169,7 +157,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
     }
 
     static KeyValuePair<string, JsonNode?> ToJsonSchema(ToolParameter parameter) {
-        var value = new JsonObject { ["type"] = parameter.Type.JsonType };
+        var value = new JsonObject { ["type"] = parameter.Type.Kind };
         if (parameter.Description is not null)
             value["description"] = parameter.Description;
         if (parameter.Type is ToolParameterType.EnumType e)
@@ -178,7 +166,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
     }
 
     static (bool IsStrict, JsonObject Parameters) ToJsonSchema(IReadOnlyList<ToolParameter> parameters) {
-        var required = (from p in parameters where !p.IsOptional select (JsonNode) p.Name).ToArray();
+        var required = (from p in parameters where !p.IsOptional select (JsonNode)p.Name).ToArray();
         var strict = required.Length == parameters.Count;
         var result = new JsonObject {
             ["type"] = "object",

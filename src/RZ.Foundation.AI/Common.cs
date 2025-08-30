@@ -56,7 +56,7 @@ public readonly record struct ChatCost(decimal Input, decimal Output)
 public readonly record struct ToolRequest(string Id, string Function, JsonNode? Arguments);
 public readonly record struct ToolResponse(string Id, JsonNode Response);
 
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(Text), "text")]
 [JsonDerivedType(typeof(Image), "image")]
 [JsonDerivedType(typeof(Audio), "audio")]
@@ -67,16 +67,16 @@ public readonly record struct ToolResponse(string Id, JsonNode Response);
 public abstract record ContentType
 {
     public sealed record Text(string Content) : ContentType;
-    public sealed record Image(byte[] Content, string MediaType) : ContentType;
-    public sealed record Audio(byte[] Content, string MediaType) : ContentType;
-    public sealed record File(byte[] Content, string MediaType, string FileName) : ContentType;
+    public sealed record Image(byte[] Data, string MediaType) : ContentType;
+    public sealed record Audio(byte[] Data, string MediaType) : ContentType;
+    public sealed record File(byte[] Data, string MediaType, string FileName) : ContentType;
 
     public sealed record ImageUri(WebRequestData Request) : ContentType;
     public sealed record AudioUri(WebRequestData Request) : ContentType;
     public sealed record FileUri(WebRequestData Request, string FileName) : ContentType;
 }
 
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(Content), "content")]
 [JsonDerivedType(typeof(MultiContent), "multi-content")]
 [JsonDerivedType(typeof(ToolCall), "tool-call")]
@@ -84,7 +84,7 @@ public abstract record ContentType
 public abstract record ChatMessage
 {
     public sealed record Content(ChatRole Role, string Message) : ChatMessage;
-    public sealed record MultiContent(ChatRole Role, IReadOnlyList<ContentType> Message) : ChatMessage;
+    public sealed record MultiContent(ChatRole Role, IReadOnlyList<ContentType> Messages) : ChatMessage;
     public sealed record ToolCall(IReadOnlyList<ToolRequest> Requests) : ChatMessage;
     public sealed record ToolResult(ToolResponse Response) : ChatMessage;
 }
@@ -104,7 +104,7 @@ public readonly record struct CostStructure(ChatCost Text, int InputThreshold, C
         => new(ChatCost.Zero, 0, new ChatCost(input, output), new(0, thought));
 }
 
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "JsonType")]
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(StringType), "string")]
 [JsonDerivedType(typeof(NumberType), "number")]
 [JsonDerivedType(typeof(BooleanType), "boolean")]
@@ -113,19 +113,19 @@ public abstract record ToolParameterType
 {
     public sealed record StringType : ToolParameterType
     {
-        public override string JsonType => "string";
+        public override string Kind => "String";
     }
     public sealed record NumberType : ToolParameterType
     {
-        public override string JsonType => "number";
+        public override string Kind => "Number";
     }
     public sealed record BooleanType : ToolParameterType
     {
-        public override string JsonType => "boolean";
+        public override string Kind => "Boolean";
     }
     public sealed record EnumType(IReadOnlyList<string> Literals) : ToolParameterType
     {
-        public override string JsonType => "string";
+        public override string Kind => "String";
     }
 
     public static readonly ToolParameterType String = new StringType();
@@ -148,7 +148,7 @@ public abstract record ToolParameterType
     }
 
     [JsonIgnore]
-    public abstract string JsonType { get; }
+    public abstract string Kind { get; }
 }
 
 public readonly record struct ToolParameter(string Name, string? Description, ToolParameterType Type, Option<object>? DefaultValue)
@@ -179,7 +179,7 @@ public readonly record struct ToolDefinition(string Name, string? Description, I
             parameters = Parameters.Map(p => new {
                 name = p.Name,
                 description = p.Description,
-                type = p.Type.JsonType,
+                type = p.Type.Kind,
                 isOptional = p.IsOptional,
                 @enum = p.Type is ToolParameterType.EnumType et ? et.Literals : null
             }).ToArray()
@@ -189,7 +189,7 @@ public readonly record struct ToolDefinition(string Name, string? Description, I
     public JsonObject ToJsonSchema() {
         var properties = new JsonObject();
         foreach (var p in Parameters){
-            var type = p.Type.JsonType;
+            var type = p.Type.Kind;
             var prop = new JsonObject {
                 ["type"] = type,
                 ["description"] = p.Description
