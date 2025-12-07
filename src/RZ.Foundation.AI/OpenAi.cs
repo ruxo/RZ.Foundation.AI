@@ -48,7 +48,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
             ChatCost getCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;
         };
 
-        async ValueTask<Option<OpenAI.Chat.ChatMessage>> Convert(ChatMessage cm)
+        async ValueTask<Option<OpenAI.Chat.ChatMessage>> Convert(ChatMessage cm, int _, CancellationToken __)
             => Optional(await ConvertChatMessageToMessage(http, cm));
     }
 
@@ -111,7 +111,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         };
 
     static async Task<OpenAI.Chat.ChatMessage?> ToChatMessage(HttpClient http, ChatMessage.MultiContent entry) {
-        var parts = await entry.Messages.MapAsync(async x => await CreatePart(http, x)).ToArrayAsync();
+        var parts = await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(http, x)).ToArrayAsync();
         return entry.Role switch {
             ChatRole.Agent                      => new AssistantChatMessage(parts),
             ChatRole.System                     => new SystemChatMessage(parts),

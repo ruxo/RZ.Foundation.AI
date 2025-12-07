@@ -9,8 +9,8 @@
   <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="MinVer" Version="6.0.0" />
-    <PackageVersion Include="OpenAI" Version="2.3.0" />
-    <PackageVersion Include="Google_GenerativeAI" Version="3.0.0" />
+    <PackageVersion Include="OpenAI" Version="2.7.0" />
+    <PackageVersion Include="Google_GenerativeAI" Version="3.4.1" />
     <PackageVersion Include="RZ.Foundation" Version="8.0.0" />
     <PackageVersion Include="RZ.Foundation.Validation" Version="0.2.0" />
     <!-- Test -->
