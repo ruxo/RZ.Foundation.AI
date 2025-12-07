@@ -1,22 +1,23 @@
 ﻿<Project>
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="MinVer" Version="6.0.0" />
     <PackageVersion Include="OpenAI" Version="2.3.0" />
     <PackageVersion Include="Google_GenerativeAI" Version="3.0.0" />
-    <PackageVersion Include="RZ.Foundation" Version="7.0.6" />
-    <PackageVersion Include="RZ.Foundation.Validation" Version="0.1.0" />
+    <PackageVersion Include="RZ.Foundation" Version="8.0.0" />
+    <PackageVersion Include="RZ.Foundation.Validation" Version="0.2.0" />
     <!-- Test -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageVersion Include="RZ.Foundation.Testing" Version="7.0.7" />
-    <PackageVersion Include="xunit.v3" Version="3.0.1" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="RZ.Foundation.Testing" Version="8.0.0" />
+    <PackageVersion Include="xunit.v3" Version="3.2.1" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageVersion>
