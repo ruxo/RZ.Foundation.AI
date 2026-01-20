@@ -37,7 +37,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         var ai = new ChatClient(model, apiKey);
 
         return async (messages, options) => {
-            var history = await messages.ChooseAsync(Convert).ToArrayAsync();
+            var history = await ThrowIfError(messages.ChooseAsync(Convert).MakeList());
             var completion = await ai.CompleteChatAsync(history, options);
             var usage = completion.Value.Usage;
             var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount, 0);
@@ -48,8 +48,8 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
             ChatCost getCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;
         };
 
-        async ValueTask<Option<OpenAI.Chat.ChatMessage>> Convert(ChatMessage cm, int _, CancellationToken __)
-            => Optional(await ConvertChatMessageToMessage(http, cm));
+        ValueTask<Outcome<OpenAI.Chat.ChatMessage>> Convert(ChatMessage cm, int _, CancellationToken __)
+            => ConvertChatMessageToMessage(http, cm);
     }
 
     AiChatFunc CreateModelInternal(string model, IEnumerable<ChatTool> tools, AgentCommonParameters? cp = null) {
@@ -87,14 +87,14 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         };
     }
 
-    static async ValueTask<OpenAI.Chat.ChatMessage?> ConvertChatMessageToMessage(HttpClient http, ChatMessage cm)
+    static async ValueTask<Outcome<OpenAI.Chat.ChatMessage>> ConvertChatMessageToMessage(HttpClient http, ChatMessage cm)
         => cm switch {
-            ChatMessage.Content entry      => ToChatMessage(entry),
+            ChatMessage.Content entry      => ToChatMessage(entry) is {} v? v : new ErrorInfo(StandardErrorCodes.NotFound),
             ChatMessage.MultiContent entry => await ToChatMessage(http, entry),
             ChatMessage.ToolCall tc        => ToChatMessage(tc),
             ChatMessage.ToolResult tr      => ToolChatMessage(tr),
 
-            _ => throw new NotSupportedException($"Unknown message type: {cm.GetType().Name}")
+            _ => new ErrorInfo("invalid-operation", $"Unknown message type: {cm.GetType().Name}")
         };
 
     static OpenAI.Chat.ChatMessage? ToChatMessage(ChatMessage.Content entry)
@@ -110,27 +110,29 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
             _ => throw new NotSupportedException($"Unknown role: {entry.Role}")
         };
 
-    static async Task<OpenAI.Chat.ChatMessage?> ToChatMessage(HttpClient http, ChatMessage.MultiContent entry) {
-        var parts = await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(http, x)).ToArrayAsync();
+    static async ValueTask<Outcome<OpenAI.Chat.ChatMessage>> ToChatMessage(HttpClient http, ChatMessage.MultiContent entry) {
+        var result = await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(http, x)).ToArrayAsync();
+        if (Fail(With(result), out var e, out var parts)) return e;
+
         return entry.Role switch {
             ChatRole.Agent                      => new AssistantChatMessage(parts),
             ChatRole.System                     => new SystemChatMessage(parts),
             ChatRole.User or ChatRole.Developer => new UserChatMessage(parts),
 
-            ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => null,
+            ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => new ErrorInfo(StandardErrorCodes.NotFound),
 
-            ChatRole.Tool or ChatRole.ToolResponse => throw new Exception("Tool roles are not expected here!"),
+            ChatRole.Tool or ChatRole.ToolResponse => new ErrorInfo(StandardErrorCodes.ValidationFailed, "Tool roles are not expected here!"),
 
-            _ => throw new NotSupportedException($"Unknown role: {entry.Role}")
+            _ => new ErrorInfo("invalid-operation", $"Unknown role: {entry.Role}")
         };
     }
 
-    static async ValueTask<ChatMessageContentPart> CreatePart(HttpClient http, ContentType ct)
+    static async ValueTask<Outcome<ChatMessageContentPart>> CreatePart(HttpClient http, ContentType ct)
         => ct switch {
             ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Content),
             ContentType.Image m => CreateImagePart((m.MediaType, m.Data)),
 
-            ContentType.ImageUri m => CreateImagePart(await m.Request.Retrieve(http)),
+            ContentType.ImageUri m => Success(await m.Request.Retrieve(http), out var v, out var e)? CreateImagePart(v) : e,
 
             _ => throw new NotSupportedException($"Unknown content type: {ct.GetType().Name}")
         };
