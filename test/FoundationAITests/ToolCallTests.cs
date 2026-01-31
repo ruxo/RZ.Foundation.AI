@@ -20,12 +20,12 @@ public class ToolCallTests
         tools[0].Method.Should().BeSameAs(typeof(ComputingUnit).GetMethod(nameof(ComputingUnit.Compute))!);
 
         // and when parse parameters
-        var parameters = tools[0].ParseParameters(JsonSerializer.SerializeToNode(new { x = 1 }));
+        var parameters = tools[0].ParseParameters(JsonSerializer.SerializeToNode(new { x = 1 })).Unwrap();
         parameters.Length.Should().Be(1);
         parameters[0].Should().Be(1);
 
         // and when call the method
-        var result = await tools[0].Call(parameters);
+        var result = await ThrowIfError(tools[0].Call(parameters));
         result.Should().Be("Compute value of 1 = 43");
     }
 
@@ -61,8 +61,8 @@ public sealed class StaticToolTests
 
     [Fact]
     public async Task CheckCallTool() {
-        var parameters = wrappers[0].ParseParameters(JsonSerializer.SerializeToNode(new { a = 1, b = 2 }));
-        var result = await wrappers[0].Call(parameters);
+        var parameters = wrappers[0].ParseParameters(JsonSerializer.SerializeToNode(new { a = 1, b = 2 })).Unwrap();
+        var result = await ThrowIfError(wrappers[0].Call(parameters));
 
         result.Should().Be("1 + 2 = 3");
     }

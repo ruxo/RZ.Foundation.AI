@@ -6,14 +6,18 @@ namespace FoundationAITests;
 
 public class GeminiAiTests
 {
-    const string GeminiAiKey = "(API key)";
+    const string GeminiAiKey = "(API key from https://aistudio.google.com/api-keys)";
+    const bool RunTests = false;
+
     static readonly HttpClient http = new();
 
-    [Fact(Explicit = true)]
+    [Fact]
     public async Task SimpleChat() {
-        var chat = new GeminiAi(GeminiAiKey, http).CreateModel(GeminiAi.gemini_15_flash_8b);
+        if (!RunTests) Assert.Skip("Skipping test");
 
-        var (response, cost) = await chat([new ChatMessage.Content(ChatRole.User, "Hello")]);
+        var chat = new GeminiAi(GeminiAiKey, http).CreateModel(GeminiAi.GEMINI_20_FLASH_LITE);
+
+        var (response, cost) = await ThrowIfError(chat([new ChatMessage.Content(ChatRole.User, "Hello")]));
 
         TestContext.Current.TestOutputHelper!.WriteLine($"Cost: {cost}");
         cost.Input.Should().BeGreaterThan(0m);

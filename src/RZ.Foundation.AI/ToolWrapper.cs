@@ -2,8 +2,6 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using RZ.Foundation.Types;
-using PureAttribute = System.Diagnostics.Contracts.PureAttribute;
 
 namespace RZ.Foundation.AI;
 
@@ -56,9 +54,8 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
         => (from method in methods
             let name = (nameGetter ?? GetAiToolName)(method)
             where name is not null
-
             let toolDef = ToolDefinition.From(name, method)
-            select new ToolWrapper(toolDef, method.IsStatic? null : tool, method)
+            select new ToolWrapper(toolDef, method.IsStatic ? null : tool, method)
            ).ToArray();
 
     /// <summary>
@@ -78,19 +75,37 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
     /// <exception cref="ArgumentOutOfRangeException">Thrown when an enum value is invalid.</exception>
     /// <exception cref="ErrorInfoException">Thrown when a required parameter is missing.</exception>
     [Pure]
-    public object?[] ParseParameters(JsonNode? payload) {
-        var pdef = Definition.Parameters;
-        var parameters = from pinfo in Method.GetParameters()
-                         let p = pdef.Single(x => x.Name == pinfo.Name)
-                         let valueFromParameters = from parameter in Optional(payload![p.Name])
-                                                   from pvalue in Optional(GetValue(pinfo.ParameterType, parameter.AsValue()))
-                                                   select p.Type is ToolParameterType.EnumType
-                                                              ? Enum.TryParse(pinfo.ParameterType, pvalue.ToString(), out var ev) ? ev : throw new ArgumentOutOfRangeException($"{pvalue} is not a valid literal for enum type {p.Name}")
-                                                              : pvalue
-                         let value = valueFromParameters.ToNullable()
-                                  ?? (p.DefaultValue ?? throw new ErrorInfoException(StandardErrorCodes.InvalidRequest, $"Missing parameter: {p.Name}")).ToNullable()
-                         select value;
-        return parameters.ToArray();
+    public Outcome<object?[]> ParseParameters(JsonNode? payload)
+        => Success(ParsePayload(payload).Map(x => x.CheckNotFound()).MakeMutableList(x => x.ToNullable()), out var values, out var e)
+               ? SuccessOutcome(values.ToArray())
+               : e;
+
+    IEnumerable<Outcome<object>> ParsePayload(JsonNode? payload) {
+        if (payload is null) yield break;
+
+        foreach (var pinfo in Method.GetParameters()){
+            if (IfSome(Definition.Parameters.TrySingle(x => x.Name == pinfo.Name), out var p)){
+                if (!IfSome(Optional(payload[p.Name]), out var parameter)
+                 || FailButNotFound(GetValue(pinfo.ParameterType, parameter.AsValue()), out var e, out var v))
+                    yield return p.DefaultValue ?? new ErrorInfo(InvalidRequest, $"Missing parameter: {p.Name}");
+                else{
+                    var pvalue = e?.IsNotFound() == true ? null : v;
+                    if (p.Type is ToolParameterType.EnumType)
+                        if (Enum.TryParse(pinfo.ParameterType, pvalue!.ToString(), out var ev))
+                            yield return ev;
+                        else{
+                            yield return new ErrorInfo(InvalidRequest, $"Invalid enum value for parameter '{p.Name}': {pvalue}");
+                            yield break;
+                        }
+                    else
+                        yield return pvalue ?? ErrorInfo.NotFound;
+                }
+            }
+            else{
+                yield return new ErrorInfo(InvalidRequest, $"Invalid parameter: {pinfo.Name}");
+                yield break;
+            }
+        }
     }
 
     /// <summary>
@@ -98,36 +113,41 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
     /// </summary>
     /// <param name="args">The arguments to pass to the method.</param>
     /// <returns>The result of the method invocation.</returns>
-    /// <exception cref="NotSupportedException">Thrown when the method returns null or has an unsupported return type.</exception>
-    public async ValueTask<object> Call(params object?[] args) {
-        var result = Method.Invoke(Tool, args);
-        return (result switch {
-                       Task t when t.GetType().IsGenericType        => await Expression.Lambda<Func<Task<object?>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(t.GetType().GetGenericArguments()[0]), Expression.Constant(t))).Compile()(),
-                       ValueTask vt when vt.GetType().IsGenericType => await Expression.Lambda<Func<Task<object?>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertValueTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(vt.GetType().GetGenericArguments()[0]), Expression.Constant(vt))).Compile()(),
+    public async ValueTask<Outcome<object>> Call(object?[] args) {
+        object? result;
+        try{
+            result = Method.Invoke(Tool, args);
+        }
+        catch (Exception e){
+            return ErrorFrom.Exception(e);
+        }
+        return result switch {
+            Task t when t.GetType().IsGenericType        => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(t.GetType().GetGenericArguments()[0]), Expression.Constant(t))).Compile()(),
+            ValueTask vt when vt.GetType().IsGenericType => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertValueTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(vt.GetType().GetGenericArguments()[0]), Expression.Constant(vt))).Compile()(),
 
-                       null => throw new NotSupportedException($"Tool {Method.DeclaringType?.Name}.{Method.Name} returned null"),
-                       _    => result
-                   })!;
+            null => new ErrorInfo(Unhandled, $"Tool {Method.DeclaringType?.Name}.{Method.Name} returned null"),
+            _    => result
+        };
     }
 
     static async Task<object> ConvertTask<T>(Task<T> task)           => (await task)!;
     static async Task<object> ConvertValueTask<T>(ValueTask<T> task) => (await task)!;
 
-    static object? GetValue(Type propType, JsonValue jv)
+    static Outcome<object> GetValue(Type propType, JsonValue jv)
         => jv.GetValueKind() switch {
-            JsonValueKind.Null   => null,
-            JsonValueKind.String => jv.GetValue<string>(),
-            JsonValueKind.Number => GetNumberValue(propType, jv),
+            JsonValueKind.Null                        => ErrorInfo.NotFound,
+            JsonValueKind.String                      => jv.GetValue<string>(),
+            JsonValueKind.Number                      => GetNumberValue(propType, jv),
             JsonValueKind.True or JsonValueKind.False => jv.GetValue<bool>(),
 
-            _ => throw new NotSupportedException($"Unsupported value kind: {jv.GetValueKind()}")
+            _ => new ErrorInfo(Unhandled, $"Unsupported value kind: {jv.GetValueKind()}")
         };
 
-    static object GetNumberValue(Type t, JsonValue jv) {
+    static Outcome<object> GetNumberValue(Type t, JsonValue jv) {
         var propType = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Nullable<>) ? t.GenericTypeArguments[0] : t;
         return propType == typeof(int)       ? jv.GetValue<int>()
                : propType == typeof(double)  ? jv.GetValue<double>()
                : propType == typeof(decimal) ? jv.GetValue<decimal>()
-                                               : throw new NotSupportedException($"Unsupported type: {t.Name}");
+                                               : new ErrorInfo(Unhandled, $"Unsupported type: {t.Name}");
     }
 }

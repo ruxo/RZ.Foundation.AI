@@ -1,8 +1,5 @@
-﻿// ReSharper disable InconsistentNaming
-
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using OpenAI.Chat;
-using RZ.Foundation.Types;
 
 namespace RZ.Foundation.AI;
 
@@ -37,19 +34,17 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         var ai = new ChatClient(model, apiKey);
 
         return async (messages, options) => {
-            var history = await ThrowIfError(messages.ChooseAsync(Convert).MakeList());
-            var completion = await ai.CompleteChatAsync(history, options);
+            if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)
+             || Fail(await TryCatch(ai.CompleteChatAsync(history, options)), out e, out var completion)) return e;
+
             var usage = completion.Value.Usage;
             var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount, 0);
             var entryIndex = 0;
-            var result = ReadResult(clock ?? TimeProvider.System, getCost, completion).ToArray();
+            if (Fail(ReadResult(clock ?? TimeProvider.System, GetCost, completion), out e, out var result)) return e;
             return (result, cost);
 
-            ChatCost getCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;
+            ChatCost GetCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;
         };
-
-        ValueTask<Outcome<OpenAI.Chat.ChatMessage>> Convert(ChatMessage cm, int _, CancellationToken __)
-            => ConvertChatMessageToMessage(http, cm);
     }
 
     AiChatFunc CreateModelInternal(string model, IEnumerable<ChatTool> tools, AgentCommonParameters? cp = null) {
@@ -65,80 +60,107 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
 
     #region Response transformation
 
-    static IEnumerable<ChatEntry> ReadResult(TimeProvider clock, Func<ChatCost> getCost, ChatCompletion completion) {
+    static Outcome<IReadOnlyList<ChatEntry>> ReadResult(TimeProvider clock, Func<ChatCost> getCost, ChatCompletion completion) {
         var now = clock.GetLocalNow();
         return completion.FinishReason switch {
-            ChatFinishReason.Stop => from part in completion.Content
-                                     where part.Kind == ChatMessageContentPartKind.Text
-                                     select new ChatEntry(now, new ChatMessage.Content(ChatRole.Agent, part.Text), Admin: null, getCost()),
+            ChatFinishReason.Stop => SuccessOutcome(ReadOnly(from part in completion.Content
+                                                             where part.Kind == ChatMessageContentPartKind.Text
+                                                             select new ChatEntry(now, new ChatMessage.Content(ChatRole.Agent, part.Text), Admin: null, getCost()))),
 
-            ChatFinishReason.ToolCalls => [
-                new ChatEntry(now,
-                              new ChatMessage.ToolCall((from toolCall in completion.ToolCalls
-                                                        let arguments = JsonNode.Parse(toolCall.FunctionArguments)
-                                                        select new ToolRequest(toolCall.Id, toolCall.FunctionName, arguments)).ToArray()), Admin: null, getCost())
-            ],
+            ChatFinishReason.ToolCalls => ToolCallResult(completion, getCost, now),
 
-            ChatFinishReason.Length        => throw new ErrorInfoException(StandardErrorCodes.ServiceError, "Incomplete model output due to MaxTokens parameter or token limit exceeded."),
-            ChatFinishReason.ContentFilter => throw new ErrorInfoException(StandardErrorCodes.ServiceError, "Omitted content due to a content filter flag."),
-            ChatFinishReason.FunctionCall  => throw new ErrorInfoException(StandardErrorCodes.ServiceError, "Deprecated in favor of tool calls."),
+            ChatFinishReason.Length        => new ErrorInfo(ServiceError, "Incomplete model output due to MaxTokens parameter or token limit exceeded."),
+            ChatFinishReason.ContentFilter => new ErrorInfo(ServiceError, "Omitted content due to a content filter flag."),
+            ChatFinishReason.FunctionCall  => new ErrorInfo(ServiceError, "Deprecated in favor of tool calls."),
 
-            _ => throw new NotSupportedException($"Unknown finish reason: {completion.FinishReason}")
+            _ => new ErrorInfo(Unhandled, $"Unknown finish reason: {completion.FinishReason}")
         };
+
+        static Outcome<IReadOnlyList<ChatEntry>> ToolCallResult(ChatCompletion completion, Func<ChatCost> getCost, DateTimeOffset now) {
+            var ops = completion.ToolCalls
+                                .Map(toolCall => from arguments in Parse(toolCall.FunctionArguments)
+                                                 select new ToolRequest(toolCall.Id, toolCall.FunctionName, arguments))
+                                .MakeList();
+            if (Fail(ops, out var e, out var results)) return e;
+
+            return SuccessOutcome(ReadOnly(new ChatEntry(now, new ChatMessage.ToolCall(results), Admin: null, getCost())));
+        }
+
+        static Outcome<JsonNode> Parse(BinaryData data)
+            => JsonNode.Parse(data) is { } v ? SuccessOutcome(v) : ErrorInfo.NotFound;
     }
 
     static async ValueTask<Outcome<OpenAI.Chat.ChatMessage>> ConvertChatMessageToMessage(HttpClient http, ChatMessage cm)
         => cm switch {
-            ChatMessage.Content entry      => ToChatMessage(entry) is {} v? v : new ErrorInfo(StandardErrorCodes.NotFound),
+            ChatMessage.Content entry      => ToChatMessage(entry),
             ChatMessage.MultiContent entry => await ToChatMessage(http, entry),
             ChatMessage.ToolCall tc        => ToChatMessage(tc),
             ChatMessage.ToolResult tr      => ToolChatMessage(tr),
 
-            _ => new ErrorInfo("invalid-operation", $"Unknown message type: {cm.GetType().Name}")
+            _ => throw new NotSupportedException($"Unknown message type: {cm.GetType().Name}")
         };
 
-    static OpenAI.Chat.ChatMessage? ToChatMessage(ChatMessage.Content entry)
+    static Outcome<OpenAI.Chat.ChatMessage> ToChatMessage(ChatMessage.Content entry)
         => entry.Role switch {
-            ChatRole.Agent                      => new AssistantChatMessage(entry.Message),
-            ChatRole.System                     => new SystemChatMessage(entry.Message),
-            ChatRole.User or ChatRole.Developer => new UserChatMessage(entry.Message),
+            ChatRole.Agent  => new AssistantChatMessage(entry.Message),
+            ChatRole.System => new SystemChatMessage(entry.Message),
+            ChatRole.User   => new UserChatMessage(entry.Message),
+#pragma warning disable OPENAI001
+            ChatRole.Developer => new DeveloperChatMessage(entry.Message),
+#pragma warning restore OPENAI001
 
-            ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => null,
+            ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => ErrorInfo.NotFound,
 
-            ChatRole.Tool or ChatRole.ToolResponse => throw new Exception("Tool roles are not expected here!"),
+            ChatRole.Tool or ChatRole.ToolResponse => new ErrorInfo(Unhandled, "Tool roles are not expected here!"),
 
-            _ => throw new NotSupportedException($"Unknown role: {entry.Role}")
+            _ => new ErrorInfo(Unhandled, $"Unknown role: {entry.Role}")
         };
 
     static async ValueTask<Outcome<OpenAI.Chat.ChatMessage>> ToChatMessage(HttpClient http, ChatMessage.MultiContent entry) {
-        var result = await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(http, x)).ToArrayAsync();
-        if (Fail(With(result), out var e, out var parts)) return e;
+        if (Fail(await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(http, x)).MakeList(), out var e, out var parts)) return e;
 
         return entry.Role switch {
-            ChatRole.Agent                      => new AssistantChatMessage(parts),
-            ChatRole.System                     => new SystemChatMessage(parts),
-            ChatRole.User or ChatRole.Developer => new UserChatMessage(parts),
+            ChatRole.Agent  => new AssistantChatMessage(parts),
+            ChatRole.System => new SystemChatMessage(parts),
+            ChatRole.User   => new UserChatMessage(parts),
+#pragma warning disable OPENAI001
+            ChatRole.Developer => new DeveloperChatMessage(parts),
+#pragma warning restore OPENAI001
 
-            ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => new ErrorInfo(StandardErrorCodes.NotFound),
+            ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => ErrorInfo.NotFound,
 
-            ChatRole.Tool or ChatRole.ToolResponse => new ErrorInfo(StandardErrorCodes.ValidationFailed, "Tool roles are not expected here!"),
+            ChatRole.Tool or ChatRole.ToolResponse => new ErrorInfo(Unhandled, "Tool roles are not expected here!"),
 
-            _ => new ErrorInfo("invalid-operation", $"Unknown role: {entry.Role}")
+            _ => new ErrorInfo(Unhandled, $"Unknown role: {entry.Role}")
         };
     }
 
     static async ValueTask<Outcome<ChatMessageContentPart>> CreatePart(HttpClient http, ContentType ct)
         => ct switch {
-            ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Content),
+            ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Data),
             ContentType.Image m => CreateImagePart((m.MediaType, m.Data)),
+            ContentType.Audio m => CreateAudioPart((m.MediaType, m.Data)),
+            ContentType.File m  => CreateFilePart(m.FileName, (m.MediaType, m.Data)),
 
-            ContentType.ImageUri m => Success(await m.Request.Retrieve(http), out var v, out var e)? CreateImagePart(v) : e,
+            ContentType.ImageUri m => await (from data in m.Request.Retrieve(http) select CreateImagePart(data)),
+            ContentType.AudioUri m => await (from data in m.Request.Retrieve(http) select CreateAudioPart(data)),
+            ContentType.FileUri m  => await (from data in m.Request.Retrieve(http) select CreateFilePart(m.FileName, data)),
 
-            _ => throw new NotSupportedException($"Unknown content type: {ct.GetType().Name}")
+            _ => new ErrorInfo(Unhandled, $"Unknown content type: {ct.GetType().Name}")
         };
 
     static ChatMessageContentPart CreateImagePart((string MediaType, byte[] Data) data)
         => ChatMessageContentPart.CreateImagePart(BinaryData.FromBytes(data.Data), data.MediaType);
+
+    static ChatMessageContentPart CreateAudioPart((string MediaType, byte[] Data) data)
+#pragma warning disable OPENAI001
+        => ChatMessageContentPart.CreateInputAudioPart(BinaryData.FromBytes(data.Data), new ChatInputAudioFormat(data.MediaType));
+#pragma warning restore OPENAI001
+
+    static ChatMessageContentPart CreateFilePart(string fileName, (string MediaType, byte[] Data) data)
+#pragma warning disable OPENAI001
+        => ChatMessageContentPart.CreateFilePart(BinaryData.FromBytes(data.Data), data.MediaType, fileName);
+#pragma warning restore OPENAI001
 
     static AssistantChatMessage ToChatMessage(ChatMessage.ToolCall tc)
         => new(from t in tc.Requests

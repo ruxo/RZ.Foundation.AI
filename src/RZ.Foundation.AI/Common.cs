@@ -1,10 +1,8 @@
-﻿global using AgentResponse = System.Threading.Tasks.Task<(System.Collections.Generic.IReadOnlyList<RZ.Foundation.AI.ChatEntry> Chat, RZ.Foundation.AI.ChatCost Cost)>;
+﻿global using AgentResponse = System.Threading.Tasks.ValueTask<RZ.Foundation.Outcome<(System.Collections.Generic.IReadOnlyList<RZ.Foundation.AI.ChatEntry> Chat, RZ.Foundation.AI.ChatCost Cost)>>;
 using System.ComponentModel;
 using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using RZ.Foundation.Types;
-using PureAttribute = System.Diagnostics.Contracts.PureAttribute;
 
 namespace RZ.Foundation.AI;
 
@@ -66,7 +64,7 @@ public readonly record struct ToolResponse(string Id, JsonNode Response);
 [JsonDerivedType(typeof(FileUri), "file-uri")]
 public abstract record ContentType
 {
-    public sealed record Text(string Content) : ContentType;
+    public sealed record Text(string Data) : ContentType;
     public sealed record Image(byte[] Data, string MediaType) : ContentType;
     public sealed record Audio(byte[] Data, string MediaType) : ContentType;
     public sealed record File(byte[] Data, string MediaType, string FileName) : ContentType;
@@ -113,19 +111,19 @@ public abstract record ToolParameterType
 {
     public sealed record StringType : ToolParameterType
     {
-        public override string Kind => "String";
+        public override string Kind => "string";
     }
     public sealed record NumberType : ToolParameterType
     {
-        public override string Kind => "Number";
+        public override string Kind => "number";
     }
     public sealed record BooleanType : ToolParameterType
     {
-        public override string Kind => "Boolean";
+        public override string Kind => "boolean";
     }
     public sealed record EnumType(IReadOnlyList<string> Literals) : ToolParameterType
     {
-        public override string Kind => "String";
+        public override string Kind => "string";
     }
 
     public static readonly ToolParameterType String = new StringType();

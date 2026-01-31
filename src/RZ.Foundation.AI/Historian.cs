@@ -20,7 +20,8 @@ public class Historian(AiChatFunc chat, IEnumerable<ChatMessage>? entries = null
 
     public async AgentResponse Invoke(ChatMessage message) {
         history.Add(message);
-        var (response, cost) = await chat(history);
+        if (Fail(await chat(history), out var e, out var response, out var cost)) return e.Trace();
+
         history.AddRange(from r in response select r.Message);
         return (response, cost);
     }
