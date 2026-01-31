@@ -33,11 +33,10 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
             TopP = cp?.TopP,
             ThinkingConfig = thinkingConfig
         };
-        var aiCreationResult = TryCatch(CreateNative);
+        var ai = CreateNative();
 
         return async mList => {
-            if (Fail(aiCreationResult, out var e, out var ai)) return e;
-            if (Fail(ToGeminiContent(mList), out e, out var tuple)) return e;
+            if (Fail(ToGeminiContent(mList), out var e, out var tuple)) return e;
             var (systemContent, history) = tuple;
             var request = new GenerateContentRequest(history, systemInstruction: systemContent, generationConfig: config);
             return await ai(effectiveModel, request).ConfigureAwait(false);
@@ -49,14 +48,14 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
             var effectiveModel = model == "gemini-2.5-flash" ? GEMINI_25_FLASH : model;
             var rate = RateTable[effectiveModel];
 
-            var result = await GenerateContentAsync(effectiveModel, request).ConfigureAwait(false);
+            if (Fail(await TryCatch(GenerateContentAsync(effectiveModel, request)).ConfigureAwait(false), out var e, out var result)) return e.Trace("AI Chat failed");
+
             if (result.UsageMetadata is not { } meta) return new ErrorInfo(Unhandled, "No usage metadata");
             if (result.Candidates is null) return new ErrorInfo(Unhandled, "No candidates");
 
             var cost = LLM.CalcCost(rate, meta.PromptTokenCount, meta.CandidatesTokenCount, meta.ThoughtsTokenCount);
             var entryIndex = 0;
             var now = (clock ?? TimeProvider.System).GetLocalNow();
-            ErrorInfo? e;
             var entriesResult = result.Candidates.SelectMany(h => {
                 if (h.Content is not { } content) return [new ErrorInfo(InvalidRequest, "No content")];
                 if (content.Role is not { } contentRole) return [new ErrorInfo(InvalidRequest, "No role")];

@@ -97,7 +97,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
             ChatMessage.ToolCall tc        => ToChatMessage(tc),
             ChatMessage.ToolResult tr      => ToolChatMessage(tr),
 
-            _ => throw new NotSupportedException($"Unknown message type: {cm.GetType().Name}")
+            _ => new ErrorInfo(Unhandled, $"Unknown message type: {cm.GetType().Name}")
         };
 
     static Outcome<OpenAI.Chat.ChatMessage> ToChatMessage(ChatMessage.Content entry)
