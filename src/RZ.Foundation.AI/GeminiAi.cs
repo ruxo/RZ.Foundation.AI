@@ -10,7 +10,7 @@ public delegate AgentResponse GeminiAiFunc(string model, GenerateContentRequest 
 
 [PublicAPI]
 public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = null, TimeProvider? clock = null)
-    : BaseModel(new GoogleAIPlatformAdapter(apiKey), http ?? new HttpClient(), logger)
+    : BaseModel(new GoogleAIPlatformAdapter(apiKey), http ?? SharedHttp.Client, logger)
 {
     public const string GEMINI_20_FLASH_LITE = "gemini-2.0-flash-lite";
     public const string GEMINI_20_FLASH = "gemini-2.0-flash";

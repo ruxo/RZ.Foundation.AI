@@ -29,7 +29,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         => CreateModelInternal(model, tools?.Select(ToChatTool) ?? [], cp);
 
     public OpenAiFunc CreateNative(string model, HttpClient? http = null) {
-        http ??= new HttpClient();
+        http ??= SharedHttp.Client;
         var rate = RateTable[model];
         var ai = new ChatClient(model, apiKey);
 
@@ -137,7 +137,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
 
     static async ValueTask<Outcome<ChatMessageContentPart>> CreatePart(HttpClient http, ContentType ct)
         => ct switch {
-            ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Data),
+            ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Content),
             ContentType.Image m => CreateImagePart((m.MediaType, m.Data)),
             ContentType.Audio m => CreateAudioPart((m.MediaType, m.Data)),
             ContentType.File m  => CreateFilePart(m.FileName, (m.MediaType, m.Data)),

@@ -64,7 +64,7 @@ public readonly record struct ToolResponse(string Id, JsonNode Response);
 [JsonDerivedType(typeof(FileUri), "file-uri")]
 public abstract record ContentType
 {
-    public sealed record Text(string Data) : ContentType;
+    public sealed record Text(string Content) : ContentType;
     public sealed record Image(byte[] Data, string MediaType) : ContentType;
     public sealed record Audio(byte[] Data, string MediaType) : ContentType;
     public sealed record File(byte[] Data, string MediaType, string FileName) : ContentType;
