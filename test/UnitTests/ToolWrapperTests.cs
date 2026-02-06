@@ -1,10 +1,12 @@
 ﻿using System.Text.Json;
+using JetBrains.Annotations;
 using RZ.Foundation;
 using RZ.Foundation.AI;
 
 namespace UnitTests;
 
-public class ToolCallTests
+[UsedImplicitly]
+public sealed class ToolCallTests
 {
     [Test]
     public async ValueTask ScanClassForToolInstance() {
@@ -48,6 +50,7 @@ public class ToolCallTests
     }
 }
 
+[UsedImplicitly]
 public sealed class StaticToolTests
 {
     readonly IReadOnlyList<ToolWrapper> wrappers = ToolWrapper.FromType(typeof(AddTool));

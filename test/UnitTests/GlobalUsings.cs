@@ -1,1 +1,2 @@
-﻿global using static RZ.Foundation.AOT.Prelude;
+﻿global using RZ.Foundation;
+global using static RZ.Foundation.AOT.Prelude;
