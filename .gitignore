@@ -13,3 +13,5 @@ http-client.env.json
 /*.sln*.DotSettings.user
 Core.http
 .env
+
+/test/UnitTests/Sample/

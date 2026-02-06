@@ -14,6 +14,7 @@
     <PackageVersion Include="RZ.Foundation" Version="8.2.8" />
     <PackageVersion Include="RZ.Foundation.Validation" Version="0.2.4" />
     <!-- Test -->
+      <PackageVersion Include="TUnit" Version="1.12.139" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
     <PackageVersion Include="RZ.Foundation.Testing" Version="8.0.3" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />

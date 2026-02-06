@@ -121,13 +121,14 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
         catch (Exception e){
             return ErrorFrom.Exception(e);
         }
-        return result switch {
-            Task t when t.GetType().IsGenericType        => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(t.GetType().GetGenericArguments()[0]), Expression.Constant(t))).Compile()(),
-            ValueTask vt when vt.GetType().IsGenericType => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertValueTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(vt.GetType().GetGenericArguments()[0]), Expression.Constant(vt))).Compile()(),
+        return result is null
+                   ? FailedOutcome<object>(new ErrorInfo(ValidationFailed, $"Tool {Method.DeclaringType?.Name}.{Method.Name} returned null"))
+                   : result switch {
+                       Task t when t.GetType().IsGenericType        => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(t.GetType().GetGenericArguments()[0]), Expression.Constant(t))).Compile()(),
+                       ValueTask vt when vt.GetType().IsGenericType => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertValueTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(vt.GetType().GetGenericArguments()[0]), Expression.Constant(vt))).Compile()(),
 
-            null => new ErrorInfo(Unhandled, $"Tool {Method.DeclaringType?.Name}.{Method.Name} returned null"),
-            _    => result
-        };
+                       _ => result
+                   };
     }
 
     static async Task<object> ConvertTask<T>(Task<T> task)           => (await task)!;
