@@ -8,7 +8,6 @@
         </PackageReference>
         <PackageReference Include="OpenAI" />
         <PackageReference Include="Google_GenerativeAI" />
-        <PackageReference Include="RZ.Foundation" />
         <PackageReference Include="RZ.Foundation.Validation" />
   </ItemGroup>
 
