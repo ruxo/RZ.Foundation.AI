@@ -42,10 +42,44 @@ public sealed class ToolCallTests
         await Assert.That(parameters[1]).IsEqualTo(123);
     }
 
+    [Test]
+    public async ValueTask ParseParametersWithMissingAge() {
+        // given
+        var tools = ToolWrapper.FromType(typeof(TestTools));
+        var theTool = tools.Single();
+
+        // when parse parameters with null values
+        var p = theTool.ParseParameters(JsonNode.Parse("""{"name": "John"}"""));
+
+        // then
+        await Assert.That(Success(p, out var parameters)).IsTrue();
+        await Assert.That(parameters).IsNotNull();
+        await Assert.That(parameters.Length).IsEqualTo(2);
+        await Assert.That(parameters[0]).IsEqualTo("John");
+        await Assert.That(parameters[1]).IsEqualTo(46);
+    }
+
+    [Test]
+    public async ValueTask ParseParametersWithMissingName() {
+        // given
+        var tools = ToolWrapper.FromType(typeof(TestTools));
+        var theTool = tools.Single();
+
+        // when parse parameters with null values
+        var p = theTool.ParseParameters(JsonNode.Parse("""{"age": 123}"""));
+
+        // then
+        await Assert.That(Success(p, out var parameters)).IsTrue();
+        await Assert.That(parameters).IsNotNull();
+        await Assert.That(parameters.Length).IsEqualTo(2);
+        await Assert.That(parameters[0]).IsEqualTo(null);
+        await Assert.That(parameters[1]).IsEqualTo(123);
+    }
+
     static class TestTools
     {
         [AiToolName]
-        public static ValueTask<string> Record(string? name, int? age)
+        public static ValueTask<string> Record(string? name = null, int? age = 46)
             => new($"Recorded: Name={name}, Age={age}");
     }
 

@@ -1,5 +1,6 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -88,7 +89,10 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
         foreach (var pinfo in Method.GetParameters()){
             if (IfSome(Definition.Parameters.TrySingle(x => x.Name == pinfo.Name), out var p)){
                 if (!pObj.ContainsKey(p.Name) || FailButNotFound(GetValue(pinfo.ParameterType, pObj[p.Name]!), out var e, out var v))
-                    yield return p.DefaultValue ?? new ErrorInfo(InvalidRequest, $"Missing parameter: {p.Name}");
+                    if (p.DefaultValue is null)
+                        yield return new ErrorInfo(InvalidRequest, $"Missing parameter: {p.Name}");
+                    else
+                        yield return WrapOutcome(p.DefaultValue.Value.ToNullable());
                 else{
                     var pvalue = e?.IsNotFound() == true ? null : v;
                     if (p.Type is ToolParameterType.EnumType)
@@ -98,10 +102,8 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
                             yield return new ErrorInfo(InvalidRequest, $"Invalid enum value for parameter '{p.Name}': {pvalue}");
                             yield break;
                         }
-                    else if (pvalue is null)
-                        yield return FailedOutcome<object>(ErrorInfo.NotFound);
                     else
-                        yield return pvalue;
+                        yield return WrapOutcome(pvalue);
                 }
             }
             else{
@@ -110,6 +112,10 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
             }
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static Outcome<object> WrapOutcome(object? v)
+        => v is null ? FailedOutcome<object>(ErrorInfo.NotFound) : SuccessOutcome(v);
 
     /// <summary>
     /// Invokes the wrapped method with the provided arguments and handles async/sync return values.

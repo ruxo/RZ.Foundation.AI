@@ -44,8 +44,8 @@ public static class LLM
         if (!IfSome(wrappers.TryFirst(t => t.Definition.Name == callInfo.Function), out var tool))
             return new ErrorInfo(InvalidRequest, $"Unknown tool: {callInfo.Function}");
 
-        if (Fail(tool.ParseParameters(callInfo.Arguments), out var e, out var parameters)) return e;
-        if (FailButNotFound(await tool.Call(parameters), out e, out var result)) return e;
+        if (Fail(tool.ParseParameters(callInfo.Arguments), out var e, out var parameters)) return e.Trace();
+        if (FailButNotFound(await tool.Call(parameters), out e, out var result)) return e.Trace();
 
         if (result is null)
             return new ErrorInfo(InvalidResponse, $"Tool {callInfo.Function} must not return null");
