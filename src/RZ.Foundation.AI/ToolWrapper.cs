@@ -75,30 +75,33 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
     /// <exception cref="ArgumentOutOfRangeException">Thrown when an enum value is invalid.</exception>
     /// <exception cref="ErrorInfoException">Thrown when a required parameter is missing.</exception>
     [Pure]
-    public Outcome<object?[]> ParseParameters(JsonNode? payload)
-        => Success(ParsePayload(payload).Map(x => x.CheckNotFound()).MakeMutableList(x => x.ToNullable()), out var values, out var e)
-               ? SuccessOutcome(values.ToArray())
-               : e;
+    public Outcome<object?[]> ParseParameters(JsonNode? payload) {
+        if (Success(ParsePayload(payload).Map(x => x.CheckNotFound()).MakeMutableList(x => x.ToNullable()), out var values, out var e))
+            return SuccessOutcome(values.ToArray());
+        else
+            return e;
+    }
 
     IEnumerable<Outcome<object>> ParsePayload(JsonNode? payload) {
-        if (payload is null) yield break;
+        if ((payload as JsonObject) is not { } pObj) yield break;
 
         foreach (var pinfo in Method.GetParameters()){
             if (IfSome(Definition.Parameters.TrySingle(x => x.Name == pinfo.Name), out var p)){
-                if (!IfSome(Optional(payload[p.Name]), out var parameter)
-                 || FailButNotFound(GetValue(pinfo.ParameterType, parameter.AsValue()), out var e, out var v))
+                if (!pObj.ContainsKey(p.Name) || FailButNotFound(GetValue(pinfo.ParameterType, pObj[p.Name]!), out var e, out var v))
                     yield return p.DefaultValue ?? new ErrorInfo(InvalidRequest, $"Missing parameter: {p.Name}");
                 else{
                     var pvalue = e?.IsNotFound() == true ? null : v;
                     if (p.Type is ToolParameterType.EnumType)
-                        if (Enum.TryParse(pinfo.ParameterType, pvalue!.ToString(), out var ev))
+                        if (pvalue is not null && Enum.TryParse(pinfo.ParameterType, pvalue.ToString(), out var ev))
                             yield return ev;
                         else{
                             yield return new ErrorInfo(InvalidRequest, $"Invalid enum value for parameter '{p.Name}': {pvalue}");
                             yield break;
                         }
+                    else if (pvalue is null)
+                        yield return FailedOutcome<object>(ErrorInfo.NotFound);
                     else
-                        yield return pvalue ?? ErrorInfo.NotFound;
+                        yield return pvalue;
                 }
             }
             else{
@@ -135,7 +138,7 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
 
     static async ValueTask<Outcome<object>> ConvertTask<T>(Task<T> task) {
         try{
-            return await task is {} v? v : ErrorInfo.NotFound;
+            return await task is { } v ? v : ErrorInfo.NotFound;
         }
         catch (Exception e){
             return ErrorFrom.Exception(e);
@@ -144,24 +147,25 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
 
     static async ValueTask<object> ConvertValueTask<T>(ValueTask<T> task) {
         try{
-            return await task is {} v? v : ErrorInfo.NotFound;
+            return await task is { } v ? v : ErrorInfo.NotFound;
         }
         catch (Exception e){
             return ErrorFrom.Exception(e);
         }
     }
 
-    static Outcome<object> GetValue(Type propType, JsonValue jv)
-        => jv.GetValueKind() switch {
-            JsonValueKind.Null                        => ErrorInfo.NotFound,
-            JsonValueKind.String                      => jv.GetValue<string>(),
-            JsonValueKind.Number                      => GetNumberValue(propType, jv),
-            JsonValueKind.True or JsonValueKind.False => jv.GetValue<bool>(),
+    static Outcome<object> GetValue(Type propType, JsonNode? jv)
+        => jv is null
+               ? ErrorInfo.NotFound
+               : jv.GetValueKind() switch {
+                   JsonValueKind.String                      => jv.GetValue<string>(),
+                   JsonValueKind.Number                      => GetNumberValue(propType, jv),
+                   JsonValueKind.True or JsonValueKind.False => jv.GetValue<bool>(),
 
-            _ => new ErrorInfo(Unhandled, $"Unsupported value kind: {jv.GetValueKind()}")
-        };
+                   _ => new ErrorInfo(Unhandled, $"Unsupported value kind: {jv.GetValueKind()}")
+               };
 
-    static Outcome<object> GetNumberValue(Type t, JsonValue jv) {
+    static Outcome<object> GetNumberValue(Type t, JsonNode jv) {
         var propType = t.IsGenericType && t.GetGenericTypeDefinition() == typeof(Nullable<>) ? t.GenericTypeArguments[0] : t;
         return propType == typeof(int)       ? jv.GetValue<int>()
                : propType == typeof(double)  ? jv.GetValue<double>()

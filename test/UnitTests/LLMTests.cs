@@ -39,7 +39,7 @@ public sealed class LLMTests
                     .And.Member(x => x.Requests[0].Function, func => func.IsEqualTo(nameof(AddTool.DoSomething)));
         await Assert.That(chat[1].Message).IsTypeOf<ChatMessage.ToolResult>()
                     .And.Member(x => x.Response.Id, id => id.IsEqualTo("123"))
-                    .And.Member(x => x.Response.Response, json => json.Satisfies(j => j.ToString() == "done"));
+                    .And.Member(x => x.Response.Response, json => json.Satisfies(j => j!.ToString() == "done"));
         await Assert.That(chat[2].Message).IsTypeOf<ChatMessage.Content>()
                     .And.HasProperty(x => x.Message).IsEqualTo("Got result");
     }

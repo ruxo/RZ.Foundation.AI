@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Nodes;
 using JetBrains.Annotations;
-using RZ.Foundation;
 using RZ.Foundation.AI;
 
 namespace UnitTests;
@@ -8,6 +8,47 @@ namespace UnitTests;
 [UsedImplicitly]
 public sealed class ToolCallTests
 {
+    [Test]
+    public async ValueTask ParseParametersWithNullValues() {
+        // given
+        var tools = ToolWrapper.FromType(typeof(TestTools));
+        var theTool = tools.Single();
+
+        // when parse parameters with null values
+        var p = theTool.ParseParameters(JsonNode.Parse("""{"name": null, "age": null}"""));
+
+        // then
+        await Assert.That(Success(p, out var parameters)).IsTrue();
+        await Assert.That(parameters).IsNotNull();
+        await Assert.That(parameters.Length).IsEqualTo(2);
+        await Assert.That(parameters[0]).IsNull();
+        await Assert.That(parameters[1]).IsNull();
+    }
+
+    [Test]
+    public async ValueTask ParseParametersWithNonNullValues() {
+        // given
+        var tools = ToolWrapper.FromType(typeof(TestTools));
+        var theTool = tools.Single();
+
+        // when parse parameters with null values
+        var p = theTool.ParseParameters(JsonNode.Parse("""{"name": "John", "age": 123}"""));
+
+        // then
+        await Assert.That(Success(p, out var parameters)).IsTrue();
+        await Assert.That(parameters).IsNotNull();
+        await Assert.That(parameters.Length).IsEqualTo(2);
+        await Assert.That(parameters[0]).IsEqualTo("John");
+        await Assert.That(parameters[1]).IsEqualTo(123);
+    }
+
+    static class TestTools
+    {
+        [AiToolName]
+        public static ValueTask<string> Record(string? name, int? age)
+            => new($"Recorded: Name={name}, Age={age}");
+    }
+
     [Test]
     public async ValueTask ScanClassForToolInstance() {
         var instance = new ComputingUnit(42);
