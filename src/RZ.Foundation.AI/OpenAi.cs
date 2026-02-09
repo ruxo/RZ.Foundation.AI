@@ -35,12 +35,12 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
 
         return async (messages, options) => {
             if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)
-             || Fail(await TryCatch(ai.CompleteChatAsync(history, options)), out e, out var completion)) return e;
+             || Fail(await TryCatch(ai.CompleteChatAsync(history, options)), out e, out var completion)) return e.Trace();
 
             var usage = completion.Value.Usage;
             var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount, 0);
             var entryIndex = 0;
-            if (Fail(ReadResult(clock ?? TimeProvider.System, GetCost, completion), out e, out var result)) return e;
+            if (Fail(ReadResult(clock ?? TimeProvider.System, GetCost, completion), out e, out var result)) return e.Trace();
             return (result, cost);
 
             ChatCost GetCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;

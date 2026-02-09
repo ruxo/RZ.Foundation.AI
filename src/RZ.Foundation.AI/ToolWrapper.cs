@@ -119,20 +119,37 @@ public readonly record struct ToolWrapper(ToolDefinition Definition, object? Too
             result = Method.Invoke(Tool, args);
         }
         catch (Exception e){
-            return ErrorFrom.Exception(e);
+            return ErrorFrom.Exception(e)
+                            .Trace($"Failed calling method {Method.DeclaringType?.Name}.{Method.Name} with args: {Seq(args)}");
         }
         return result is null
                    ? FailedOutcome<object>(new ErrorInfo(ValidationFailed, $"Tool {Method.DeclaringType?.Name}.{Method.Name} returned null"))
                    : result switch {
-                       Task t when t.GetType().IsGenericType        => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(t.GetType().GetGenericArguments()[0]), Expression.Constant(t))).Compile()(),
-                       ValueTask vt when vt.GetType().IsGenericType => await Expression.Lambda<Func<Task<object>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertValueTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(vt.GetType().GetGenericArguments()[0]), Expression.Constant(vt))).Compile()(),
+                       // TODO: catch lambda functions
+                       Task t when t.GetType().IsGenericType        => await Expression.Lambda<Func<ValueTask<Outcome<object>>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(t.GetType().GetGenericArguments()[0]), Expression.Constant(t))).Compile()(),
+                       ValueTask vt when vt.GetType().IsGenericType => await Expression.Lambda<Func<ValueTask<Outcome<object>>>>(Expression.Call(typeof(ToolWrapper).GetMethod(nameof(ConvertValueTask), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(vt.GetType().GetGenericArguments()[0]), Expression.Constant(vt))).Compile()(),
 
                        _ => result
                    };
     }
 
-    static async Task<object> ConvertTask<T>(Task<T> task)           => (await task)!;
-    static async Task<object> ConvertValueTask<T>(ValueTask<T> task) => (await task)!;
+    static async ValueTask<Outcome<object>> ConvertTask<T>(Task<T> task) {
+        try{
+            return await task is {} v? v : ErrorInfo.NotFound;
+        }
+        catch (Exception e){
+            return ErrorFrom.Exception(e);
+        }
+    }
+
+    static async ValueTask<object> ConvertValueTask<T>(ValueTask<T> task) {
+        try{
+            return await task is {} v? v : ErrorInfo.NotFound;
+        }
+        catch (Exception e){
+            return ErrorFrom.Exception(e);
+        }
+    }
 
     static Outcome<object> GetValue(Type propType, JsonValue jv)
         => jv.GetValueKind() switch {
