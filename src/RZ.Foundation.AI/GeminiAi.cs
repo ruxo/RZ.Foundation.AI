@@ -87,7 +87,7 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
     }
 
     static string? GetSystemMessage(ChatMessage message)
-        => message is ChatMessage.Content { Role: ChatRole.System } c ? c.Message : null;
+        => message is ChatMessage.Content { Role: ChatRole.System or ChatRole.Developer } c ? c.Message : null;
 
     static Outcome<ChatRole> ToChatRole(string role)
         => role switch {
