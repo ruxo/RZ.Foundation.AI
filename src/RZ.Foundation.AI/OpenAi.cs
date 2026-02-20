@@ -34,8 +34,8 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         var ai = new ChatClient(model, apiKey);
 
         return async (messages, options) => {
-            if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)
-             || Fail(await TryCatch(ai.CompleteChatAsync(history, options)), out e, out var completion)) return e.Trace();
+            if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)) return e.Trace();
+            if (Fail(await TryCatch(ai.CompleteChatAsync(history, options)), out e, out var completion)) return e.Trace();
 
             var usage = completion.Value.Usage;
             var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount, 0);
@@ -103,10 +103,9 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
     static Outcome<OpenAI.Chat.ChatMessage> ToChatMessage(ChatMessage.Content entry)
         => entry.Role switch {
             ChatRole.Agent  => new AssistantChatMessage(entry.Message),
-            ChatRole.System => new SystemChatMessage(entry.Message),
             ChatRole.User   => new UserChatMessage(entry.Message),
 #pragma warning disable OPENAI001
-            ChatRole.Developer => new DeveloperChatMessage(entry.Message),
+            ChatRole.System or ChatRole.Developer => new DeveloperChatMessage(entry.Message),
 #pragma warning restore OPENAI001
 
             ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => ErrorInfo.NotFound,
@@ -121,10 +120,9 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
 
         return entry.Role switch {
             ChatRole.Agent  => new AssistantChatMessage(parts),
-            ChatRole.System => new SystemChatMessage(parts),
             ChatRole.User   => new UserChatMessage(parts),
 #pragma warning disable OPENAI001
-            ChatRole.Developer => new DeveloperChatMessage(parts),
+            ChatRole.System or ChatRole.Developer => new DeveloperChatMessage(parts),
 #pragma warning restore OPENAI001
 
             ChatRole.Admin or ChatRole.Marker or ChatRole.ToolOutput => ErrorInfo.NotFound,
