@@ -116,7 +116,8 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         };
 
     static async ValueTask<Outcome<OpenAI.Chat.ChatMessage>> ToChatMessage(HttpClient http, ChatMessage.MultiContent entry) {
-        if (Fail(await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(http, x)).MakeList(), out var e, out var parts)) return e;
+        var isAgent = entry.Role == ChatRole.Agent;
+        if (Fail(await entry.Messages.MapAsync(async (x, _, _) => await CreatePart(isAgent, http, x)).MakeList(), out var e, out var parts)) return e;
 
         return entry.Role switch {
             ChatRole.Agent  => new AssistantChatMessage(parts),
@@ -133,14 +134,18 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         };
     }
 
-    static async ValueTask<Outcome<ChatMessageContentPart>> CreatePart(HttpClient http, ContentType ct)
+    static async ValueTask<Outcome<ChatMessageContentPart>> CreatePart(bool isAgent, HttpClient http, ContentType ct)
         => ct switch {
             ContentType.Text m  => ChatMessageContentPart.CreateTextPart(m.Content),
-            ContentType.Image m => CreateImagePart((m.MediaType, m.Data)),
+            ContentType.Image m => isAgent
+                ? ChatMessageContentPart.CreateTextPart($"![image](data:{m.MediaType};base64,{Convert.ToBase64String(m.Data)})")
+                : CreateImagePart((m.MediaType, m.Data)),
             ContentType.Audio m => CreateAudioPart((m.MediaType, m.Data)),
             ContentType.File m  => CreateFilePart(m.FileName, (m.MediaType, m.Data)),
 
-            ContentType.ImageUri m => await (from data in m.Request.Retrieve(http) select CreateImagePart(data)),
+            ContentType.ImageUri m => isAgent
+                ? ChatMessageContentPart.CreateTextPart($"![image]({m.Request.Uri})")
+                : await (from data in m.Request.Retrieve(http) select CreateImagePart(data)),
             ContentType.AudioUri m => await (from data in m.Request.Retrieve(http) select CreateAudioPart(data)),
             ContentType.FileUri m  => await (from data in m.Request.Retrieve(http) select CreateFilePart(m.FileName, data)),
 
