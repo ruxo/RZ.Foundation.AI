@@ -7,14 +7,14 @@
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.7" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
-    <PackageVersion Include="OpenAI" Version="2.8.0" />
-    <PackageVersion Include="Google_GenerativeAI" Version="3.6.3" />
+    <PackageVersion Include="OpenAI" Version="2.10.0" />
+    <PackageVersion Include="Google_GenerativeAI" Version="3.6.6" />
     <PackageVersion Include="RZ.Foundation.Validation" Version="0.3.0" />
     <!-- Test -->
-    <PackageVersion Include="TUnit" Version="1.13.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageVersion Include="TUnit" Version="1.44.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
     <PackageVersion Include="RZ.Foundation.Testing" Version="8.1.0" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5">

@@ -8,20 +8,45 @@ public delegate AgentResponse OpenAiFunc(IEnumerable<ChatMessage> messages, Chat
 [PublicAPI]
 public class OpenAi(string apiKey, TimeProvider? clock = null)
 {
-    public const string GPT_4O_MINI = "gpt-4o-mini";
+    // See https://developers.openai.com/api/docs/pricing
+    public const string GPT_55 = "gpt-5.5";
+
+    public const string GPT_54 = "gpt-5.4";
+    public const string GPT_54_MINI = "gpt-5.4-mini";
+    public const string GPT_54_NANO = "gpt-5.4-nano";
+
+    public const string GPT_51 = "gpt-51";
+    public const string GPT_5 = "gpt-5";
+    public const string GPT_5_MINI = "gpt-5-mini";
+    public const string GPT_5_NANO = "gpt-5-nano";
+
     public const string GPT_41_MINI = "gpt-4.1-mini";
     public const string GPT_41_NANO = "gpt-4.1-nano";
-    public const string GPT_4O = "gpt-4o";
     public const string GPT_41 = "gpt-4.1";
 
+    public const string GPT_4O_MINI = "gpt-4o-mini";
+    public const string GPT_4O = "gpt-4o";
+
     static readonly Map<string, CostStructure> RateTable = LanguageExt.Prelude.Map(
+            (GPT_5_NANO, CostStructure.Simple(0.05m, 0.4m)),
+            (GPT_41_NANO, CostStructure.Simple(0.10m, 0.4m)),
             (GPT_4O_MINI, CostStructure.Simple(0.15m, 0.6m)),
-            (GPT_41_MINI, CostStructure.Simple(0.4m, 1.6m)),
-            (GPT_41_NANO, CostStructure.Simple(0.1m, 0.4m)),
-            (GPT_4O, CostStructure.Simple(2.5m, 10m)),
-            (GPT_41, CostStructure.Simple(2m, 8m))
+            (GPT_54_NANO, CostStructure.Simple(0.20m, 1.25m)),
+            (GPT_41_MINI, CostStructure.Simple(0.40m, 1.6m)),
+            (GPT_5_MINI, CostStructure.Simple(0.25m, 2.0m)),
+            (GPT_54_MINI, CostStructure.Simple(0.75m, 4.5m)),
+            (GPT_41, CostStructure.Simple(2.00m, 8.0m)),
+            (GPT_5, CostStructure.Simple(1.25m, 10.0m)),
+            (GPT_51, CostStructure.Simple(1.25m, 10.0m)),
+            (GPT_4O, CostStructure.Simple(2.50m, 10.0m)),
+
+            (GPT_54, new CostStructure(new(2.5m, 15m), 272_000, new(5m, 22.5m), ChatCost.Zero)),
+            (GPT_55, new CostStructure(new(5.0m, 30m), 272_000, new(10m, 45m), ChatCost.Zero))
         );
 
+    public static readonly IReadOnlyList<string> SupportedModels = RateTable.Keys.ToArray().AsReadOnly();
+
+    [Obsolete("Use SupportedModels property instead")]
     public static bool IsModelSupported(string model)
         => RateTable.ContainsKey(model);
 
@@ -29,8 +54,12 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         => CreateModelInternal(model, tools?.Select(ToChatTool) ?? [], cp);
 
     public OpenAiFunc CreateNative(string model, HttpClient? http = null) {
+        var rate = RateTable.Find(model).ToNullable() ?? CostStructure.Simple(0, 0);
+        return CreateNative(model, rate, http);
+    }
+
+    public OpenAiFunc CreateNative(string model, CostStructure rate, HttpClient? http = null) {
         http ??= SharedHttp.Client;
-        var rate = RateTable[model];
         var ai = new ChatClient(model, apiKey);
 
         return async (messages, options) => {

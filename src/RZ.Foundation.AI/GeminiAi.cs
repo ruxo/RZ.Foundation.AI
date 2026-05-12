@@ -22,10 +22,19 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
             (GEMINI_25_FLASH, CostStructure.WithThought(0.15m, 0.6m, 3.5m))
         );
 
+    public static readonly IReadOnlyList<string> SupportedModels = RateTable.Keys.ToArray().AsReadOnly();
+
+    [Obsolete("Use SupportedModels property instead")]
     public static bool IsModelSupported(string model)
         => RateTable.ContainsKey(model);
 
     public AiChatFunc CreateModel(string model, in AgentCommonParameters? cp = null) {
+        var effectiveModel = model == "gemini-2.5-flash" ? GEMINI_25_FLASH : model;
+        var rate = RateTable.Find(effectiveModel).ToNullable() ?? CostStructure.Simple(0.0m, 0.0m);
+        return CreateModel(effectiveModel, rate, cp);
+    }
+
+    public AiChatFunc CreateModel(string model, CostStructure rate, in AgentCommonParameters? cp = null) {
         var effectiveModel = model == "gemini-2.5-flash" ? GEMINI_25_FLASH : model;
         var thinkingConfig = effectiveModel == GEMINI_25_FLASH ? new ThinkingConfig { IncludeThoughts = false } : null;
         var config = new GenerationConfig {
@@ -33,7 +42,7 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
             TopP = cp?.TopP,
             ThinkingConfig = thinkingConfig
         };
-        var ai = CreateNative();
+        var ai = CreateNative(rate);
 
         return async mList => {
             if (Fail(ToGeminiContent(mList), out var e, out var tuple)) return e;
@@ -43,10 +52,9 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
         };
     }
 
-    public GeminiAiFunc CreateNative()
+    public GeminiAiFunc CreateNative(CostStructure rate)
         => async (model, request) => {
             var effectiveModel = model == "gemini-2.5-flash" ? GEMINI_25_FLASH : model;
-            var rate = RateTable[effectiveModel];
 
             if (Fail(await TryCatch(GenerateContentAsync(effectiveModel, request)).ConfigureAwait(false), out var e, out var result)) return e.Trace("AI Chat failed");
 

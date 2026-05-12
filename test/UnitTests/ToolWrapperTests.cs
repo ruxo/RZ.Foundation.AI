@@ -72,7 +72,7 @@ public sealed class ToolCallTests
         await Assert.That(Success(p, out var parameters)).IsTrue();
         await Assert.That(parameters).IsNotNull();
         await Assert.That(parameters.Length).IsEqualTo(2);
-        await Assert.That(parameters[0]).IsEqualTo(null);
+        await Assert.That(parameters[0]).IsNull();
         await Assert.That(parameters[1]).IsEqualTo(123);
     }
 
