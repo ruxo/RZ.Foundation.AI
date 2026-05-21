@@ -1,9 +1,10 @@
-﻿using FluentAssertions;
+﻿using JetBrains.Annotations;
 using RZ.Foundation.AI;
 // ReSharper disable InconsistentNaming
 
 namespace FoundationAITests;
 
+[UsedImplicitly(ImplicitUseTargetFlags.Members)]
 public class GeminiAiTests
 {
     const string GeminiAiKey = "(API key from https://aistudio.google.com/api-keys)";
@@ -11,21 +12,22 @@ public class GeminiAiTests
 
     static readonly HttpClient http = new();
 
-    [Fact]
-    public async Task SimpleChat() {
-        if (!RunTests) Assert.Skip("Skipping test");
+    [Test]
+    public async ValueTask SimpleChat() {
+        Skip.When(!RunTests, "Skipped because `RunTests=false`");
 
         var chat = new GeminiAi(GeminiAiKey, http).CreateModel(GeminiAi.GEMINI_20_FLASH_LITE);
 
         var (response, cost) = await ThrowIfError(chat([new ChatMessage.Content(ChatRole.User, "Hello")]));
 
-        TestContext.Current.TestOutputHelper!.WriteLine($"Cost: {cost}");
-        cost.Input.Should().BeGreaterThan(0m);
-        cost.Output.Should().BeGreaterThan(0m);
-        response.Count.Should().Be(1, $"but {response}");
-        response[0].Cost.Should().Be(cost);
+        Console.WriteLine($"Cost: {cost}");
+
+        await Assert.That(cost.Input).IsGreaterThan(0m);
+        await Assert.That(cost.Output).IsGreaterThan(0m);
+        await Assert.That(response.Count).IsEqualTo(1).Because($"but {response}");
+        await Assert.That(response[0].Cost).IsEqualTo(cost);
 
         var content = (ChatMessage.Content)response[0].Message;
-        content.Role.Should().Be(ChatRole.Agent);
+        await Assert.That(content.Role).IsEqualTo(ChatRole.Agent);
     }
 }
