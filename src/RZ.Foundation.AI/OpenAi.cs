@@ -3,7 +3,7 @@ using OpenAI.Chat;
 
 namespace RZ.Foundation.AI;
 
-public delegate AgentResponse OpenAiFunc(IEnumerable<ChatMessage> messages, ChatCompletionOptions options);
+public delegate AgentResponse OpenAiFunc(IEnumerable<ChatMessage> messages, ChatCompletionOptions options, CancellationToken cancel = default);
 
 [PublicAPI]
 public class OpenAi(string apiKey, TimeProvider? clock = null)
@@ -62,9 +62,10 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         http ??= SharedHttp.Client;
         var ai = new ChatClient(model, apiKey);
 
-        return async (messages, options) => {
+        return async (messages, options, cancel) => {
             if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)) return e.Trace();
-            if (Fail(await TryCatch(ai.CompleteChatAsync(history, options)), out e, out var completion)) return e.Trace();
+            if (Fail(await TryCatch(ai.CompleteChatAsync(history, options, cancel)), out e, out var completion))
+                return cancel.IsCancellationRequested ? new ErrorInfo(Cancelled, "OpenAI completion cancelled") : e.Trace();
 
             var usage = completion.Value.Usage;
             var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount, 0);
