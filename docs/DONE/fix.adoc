@@ -1,0 +1,360 @@
+= RA-252 Follow-up — Cancellation, Versioning &amp; Test-Runner Fixes
+Ruxo Zheng
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+
+[abstract]
+Follow-up issues found while reviewing commits `f336d7f` (_RA-252 Add CancellationToken to OpenAiFunc_)
+and `32276f8` (_Upgrade RZ.Foundation and libraries_). Each issue below is backed by an empirical
+check (build output, test run, or source trace) — see <<evidence>>. Code examples show the proposed fix.
+
+== Issue summary
+
+[cols="1,4,1,1",options="header"]
+|===
+| # | Issue | Axis | Severity
+
+| <<i1>>
+| `CancellationToken` never reaches the public `AiChatFunc` path — only direct `CreateNative` callers can cancel.
+| Architecture / completeness
+| Important
+
+| <<i2>>
+| Cancellation is detected by a racy token poll; the type-based fix is *not* implementable because `TryCatch` erases the exception type.
+| Correctness / robustness
+| Important
+
+| <<i3>>
+| Hardcoded `<AssemblyVersion>0.6.0.0</AssemblyVersion>` is a **no-op** under MinVer — the shipped assembly is versioned `0.0.0.0`.
+| Build / release
+| Important
+
+| <<i4>>
+| `CLAUDE.md`'s documented `dotnet test …` commands run **zero tests** after the TUnit 1.45 → 1.57 upgrade.
+| Docs / workflow
+| Important
+|===
+
+NOTE: None of these block what was committed (build is green, 60/60 unit tests pass). They are completeness,
+correctness-robustness, and release-hygiene gaps surfaced by the change.
+
+[#i1]
+== Issue 1 — Cancellation does not propagate through `AiChatFunc`
+
+The token was added to the *native* delegate `OpenAiFunc` only. The library's central abstraction
+`AiChatFunc` — which everything else is built on — has no token, and the bridge between them drops it.
+
+.`src/RZ.Foundation.AI/Common.cs:92`
+[source,csharp]
+----
+public delegate AgentResponse AiChatFunc(IEnumerable<ChatMessage> messages); // no CancellationToken
+----
+
+.`src/RZ.Foundation.AI/OpenAi.cs:80-89` — the token is silently defaulted away
+[source,csharp]
+----
+AiChatFunc CreateModelInternal(string model, IEnumerable<ChatTool> tools, AgentCommonParameters? cp = null) {
+    ...
+    var ai = CreateNative(model);
+    return messages => ai(messages, options);   // <-- cancel defaults to `default`; nothing can cancel here
+}
+----
+
+Consequence: `OpenAi.CreateModel`, `Historian`, and `LLM.CreateResolver` are all non-cancellable. Only a
+caller who takes the `OpenAiFunc` from `CreateNative` and invokes it with a real token benefits. `GeminiAi`'s
+native delegate has no token at all, so there is also an OpenAI/Gemini asymmetry.
+
+[plantuml,cancellation-paths,svg]
+----
+@startuml
+title Cancellation reaches only the native OpenAiFunc path
+skinparam componentStyle rectangle
+skinparam shadowing false
+left to right direction
+
+actor Caller
+
+rectangle "Public surface — AiChatFunc (NO token)" as pub {
+  component "Historian" as H
+  component "LLM.CreateResolver" as R
+  component "OpenAi.CreateModel\n+ CreateModelInternal" as CM
+}
+
+rectangle "Native surface — OpenAiFunc (has token)" as nat {
+  component "OpenAi.CreateNative" as CN
+}
+
+cloud "OpenAI SDK\nCompleteChatAsync" as SDK
+
+Caller --> CM : messages\n(no way to pass a token)
+H --> CM
+R --> CM
+CM --> CN : ai(messages, options)\n**cancel = default**  «token lost»
+Caller --> CN : messages, options, **cancel**  «only path that cancels»
+CN --> SDK : CompleteChatAsync(history, options, cancel)
+@enduml
+----
+
+=== Proposed fix
+
+Add an optional token to `AiChatFunc` and thread it through every producer. The optional default keeps
+*call sites* source-compatible (one-arg invocations still compile); lambda *producers* must add the parameter
+(the compiler enforces this).
+
+.`Common.cs` — widen the delegate
+[source,csharp]
+----
+public delegate AgentResponse AiChatFunc(IEnumerable<ChatMessage> messages, CancellationToken cancel = default);
+----
+
+.`OpenAi.cs` — forward the token instead of dropping it
+[source,csharp]
+----
+AiChatFunc CreateModelInternal(string model, IEnumerable<ChatTool> tools, AgentCommonParameters? cp = null) {
+    ...
+    var ai = CreateNative(model);
+    return (messages, cancel) => ai(messages, options, cancel);   // forwarded
+}
+----
+
+`LLM.CreateResolver` and `Historian` then accept and pass the token down each hop (the tool-execution loop
+should also honour it). For symmetry, give `GeminiAi` the same treatment and forward into
+`GenerateContentAsync(…, cancel)` (verify the SDK overload).
+
+[WARNING]
+====
+Widening the delegate is a **breaking change for implementers** of `AiChatFunc` (every `messages => …` lambda
+must become `(messages, cancel) => …`), though not for callers. It is a sensible minor-version change — and it
+pairs naturally with <<i3>> (cut a real `0.6.0` tag for the release that carries it).
+====
+
+[#i2]
+== Issue 2 — Cancellation detection is a racy token poll, and the obvious fix doesn't compile
+
+.`src/RZ.Foundation.AI/OpenAi.cs:65-68`
+[source,csharp]
+----
+return async (messages, options, cancel) => {
+    if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)) return e.Trace();
+    if (Fail(await TryCatch(ai.CompleteChatAsync(history, options, cancel)), out e, out var completion))
+        return cancel.IsCancellationRequested ? new ErrorInfo(Cancelled, "OpenAI completion cancelled") : e.Trace();
+    ...
+----
+
+Two problems:
+
+. **Racy discriminant.** Whether the failure was a cancellation is decided by polling `cancel.IsCancellationRequested`,
+not by what actually threw. If `CompleteChatAsync` fails for an *unrelated* reason (network, 5xx) while the token
+happens to be cancelled, the genuine error `e` is **discarded** (the ternary returns the new `Cancelled` error
+instead of `e.Trace()`) and reported as a cancellation.
+
+. **The natural fix is impossible as-is.** You cannot replace the poll with "check whether `e` is an
+`OperationCanceledException`": by the time line 68 runs, `TryCatch` has already converted the exception into an
+`ErrorInfo` and *thrown the type away*. `ErrorFrom.Exception` (`Error.cs:233`) copies only `Message` + stack
+string and sets `Code` from an `[ErrorInfo]` attribute or else `"unhandled"`. `OperationCanceledException` /
+`TaskCanceledException` carry no such attribute, so a cancelled call arrives as `Code = "unhandled"` — type-identical
+to any other failure.
+
+[plantuml,type-erasure,svg]
+----
+@startuml
+title Why `e` cannot be inspected for cancellation — TryCatch erases the type
+skinparam shadowing false
+participant "CreateNative\nlambda" as L
+participant "ai.CompleteChatAsync" as SDK
+participant "TryCatch" as TC
+participant "ErrorFrom.Exception" as EF
+
+L -> SDK : await CompleteChatAsync(history, options, cancel)
+SDK -->> TC : throws OperationCanceledException
+TC -> EF : Exception(ex)
+EF -->> TC : ErrorInfo(Code = "unhandled")\n«Exception object + Type discarded»
+TC -->> L : Outcome.Fail(ErrorInfo e)
+note over L : e.Code == "unhandled"\nthe OperationCanceledException identity is gone
+L -> L : cancel.IsCancellationRequested\n  ? ErrorInfo(Cancelled)\n  : e.Trace()
+note over L #FFD0D0 : token poll races with the real cause;\nan unrelated error during cancellation is\nmislabeled "cancelled" and its trace dropped
+@enduml
+----
+
+[IMPORTANT]
+====
+This corrects a suggestion in the original review. "Inspect the exception type on `e`" is *not* implementable at
+the call site, because `TryCatch` collapses the exception before `e` exists. The fix must catch the exception
+*before* `TryCatch` runs.
+====
+
+=== Proposed fix
+
+Catch the cancellation locally — ahead of the type-erasing `TryCatch` — keeping the codebase's `Fail(…)` idiom.
+`OperationCanceledException` is matched precisely, and the `when` guard ensures only *our* cancellation is treated
+as such; everything else still flows through `ErrorFrom.Exception` exactly as `TryCatch` would have produced it.
+
+.`OpenAi.cs` — replace the `TryCatch` + ternary with a typed local catch
+[source,csharp]
+----
+return async (messages, options, cancel) => {
+    if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history))
+        return e.Trace();
+
+    if (Fail(await Complete(), out e, out var completion)) return e.Trace();
+
+    var usage = completion.Value.Usage;
+    ...
+
+    // local helper — catches BEFORE the exception type is lost
+    async Task<Outcome<ClientResult<ChatCompletion>>> Complete() {
+        try {
+            return await ai.CompleteChatAsync(history, options, cancel);
+        }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested) {
+            return new ErrorInfo(Cancelled, "OpenAI completion cancelled");
+        }
+        catch (Exception ex) {
+            return ErrorFrom.Exception(ex);   // same factory TryCatch uses internally
+        }
+    }
+};
+----
+
+[NOTE]
+====
+* `Cancelled` resolves to `"cancelled"` (`StandardErrorCodes.cs:16`, via the `using static … StandardErrorCodes` global using).
+* `ErrorFrom.Exception` is the exact factory `TryCatch` calls; fully-qualify (`RZ.Foundation.ErrorFrom`) if it is not already in a global using.
+* `when (cancel.IsCancellationRequested)` is preferred over `when (oce.CancellationToken == cancel)` because the SDK may surface a *linked* token; the guarded form is robust to that while still rejecting unrelated `OperationCanceledException`s (which fall through to the real-error branch).
+* In practice the current code "works" for a single clean cancellation only because of the token poll — the typed catch makes that correct by construction and removes the masking race.
+====
+
+[#i3]
+== Issue 3 — `<AssemblyVersion>` is dead config under MinVer
+
+`32276f8` added a `PropertyGroup` to pin the assembly version:
+
+.`src/RZ.Foundation.AI/RZ.Foundation.AI.csproj:2-4`
+[source,xml]
+----
+<PropertyGroup>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+</PropertyGroup>
+----
+
+This line has **no effect**. The project uses MinVer, whose target
+(`MinVer.targets`, `BeforeTargets="BeforeCompile;GetAssemblyVersion;CoreCompile"`) sets
+`<AssemblyVersion>$(MinVerMajor).0.0.0</AssemblyVersion>` *unconditionally* — there is no
+`Condition="'$(AssemblyVersion)' == ''"` guard — so it clobbers the static value before compile.
+
+.Empirical result (see <<evidence>>)
+[cols="1,1",options="header"]
+|===
+| Property | Built DLL value
+| `AssemblyVersion`      | `0.0.0.0`  ← the hardcoded `0.6.0.0` was ignored
+| `FileVersion`          | `0.5.9.0`  (from git tag `0.5.9`)
+| `InformationalVersion` | `0.5.9+f336d7f…`
+|===
+
+The repository's most recent version tag is `0.5.9`, so the artifact built today reports `0.5.9` — the intended
+`0.6.0` is not shipped by this line.
+
+=== Proposed fix
+
+MinVer should own the version. Delete the dead `PropertyGroup` and cut a tag for the release:
+
+[source,diff]
+----
+-    <PropertyGroup>
+-        <AssemblyVersion>0.6.0.0</AssemblyVersion>
+-    </PropertyGroup>
+----
+
+[source,bash]
+----
+git tag 0.6.0        # MinVer derives PackageVersion / FileVersion / InformationalVersion from this
+git push origin 0.6.0
+----
+
+TIP: `AssemblyVersion` deliberately stays `Major.0.0.0` (here `0.0.0.0`) for binding stability — `FileVersion`,
+`PackageVersion`, and `InformationalVersion` carry the precise version. If a *fixed, non-zero* `AssemblyVersion`
+is genuinely required, it must be set in a target that runs **after** MinVer:
+
+[source,xml]
+----
+<Target Name="PinAssemblyVersion" AfterTargets="MinVer">
+  <PropertyGroup>
+    <AssemblyVersion>$(MinVerMajor).$(MinVerMinor).0.0</AssemblyVersion>
+  </PropertyGroup>
+</Target>
+----
+
+[#i4]
+== Issue 4 — Documented test commands broken after TUnit 1.57
+
+TUnit 1.45 → 1.57 switched the runner to Microsoft.Testing.Platform. The commands in `CLAUDE.md` now run nothing:
+
+[source,bash]
+----
+$ dotnet test test/UnitTests/UnitTests.csproj            # -> "Specifying a project … via '--project'."  ZERO tests, exit 1
+$ dotnet test … --filter "LLMTests.ResolverWithToolCall" # -> same: ZERO tests, exit 1
+----
+
+=== Proposed fix
+
+Update `CLAUDE.md`'s *Commands* section to the Microsoft.Testing.Platform invocation:
+
+[source,bash]
+----
+# Run all unit tests
+dotnet run --project test/UnitTests/UnitTests.csproj -c Release
+
+# Run a single test by name
+# treenode-filter path = /<assembly>/<namespace>/<class>/<test-method>
+dotnet run --project test/UnitTests/UnitTests.csproj -c Release -- \
+    --treenode-filter "/*/*/LLMTests/ResolverWithToolCall"
+
+# Run a whole test class
+dotnet run --project test/UnitTests/UnitTests.csproj -c Release -- \
+    --treenode-filter "/*/*/LLMTests/*"
+----
+
+Both forms were confirmed against this repo (full run = 60/60 pass; single filter narrows to one test). The old
+`dotnet test` form is gone for this runner.
+
+[#evidence]
+== Verification evidence
+
+All claims above were checked empirically (3 parallel verification agents, isolated git worktrees):
+
+[cols="1,4",options="header"]
+|===
+| Claim | Evidence
+
+| <<i3>> AssemblyVersion no-op
+| Temporarily added `<AssemblyVersion>0.6.0.0</AssemblyVersion>`, built `-c Release -p:MinVerVerbosity=detailed`.
+  MinVer logged `AssemblyVersion=0.0.0.0`; `[Reflection.AssemblyName]::GetAssemblyName(dll).Version` → `0.0.0.0`
+  (not `0.6.0.0`). `MinVer.targets` (v7.0.0) sets `AssemblyVersion=$(MinVerMajor).0.0.0` with no `Condition` guard.
+
+| <<i4>> Test commands
+| TUnit `v1.57.0.0` / Microsoft Testing Platform `v2.2.3`. `dotnet run … ` → all pass; `… -- --treenode-filter
+  "/*/*/LLMTests/ResolverWithToolCall"` → 1 test. `dotnet test <csproj>` and `… --filter` → "Zero tests ran", exit 1.
+
+| <<i2>> Type erasure
+| `TryCatch` (`RZ.Foundation.AOT/AOT/Prelude.cs:355`) → `ErrorFrom.Exception` (`…/Types/Error.cs:233`) builds a new
+  `ErrorInfo` from `Message` + stack string + `[ErrorInfo]`-code-or-`"unhandled"`; it stores neither the `Exception`
+  nor its type. `ErrorInfo` (`Error.cs:20`) has no Exception/Type member. `OperationCanceledException` ⇒ `Code = "unhandled"`.
+
+| <<i1>> / <<i2>> findings
+| `AiChatFunc` (`Common.cs:92`) has no token; `CreateModelInternal` (`OpenAi.cs:88`) invokes with `cancel = default`.
+  Confirmed accurate. (The masking race in <<i2>> applies only to the `CreateNative` path, where a real token is passed —
+  on the `AiChatFunc` path `cancel` is always `default`, so the poll never mislabels there.)
+|===
+
+== Suggested commit breakdown
+
+Keep these as separate, small commits (review skill — separate refactor from fix from docs):
+
+. **Fix:** typed cancellation catch in `OpenAi.CreateNative` (<<i2>>) — the only behavioural correctness change.
+. **Feature:** thread `CancellationToken` through `AiChatFunc` + `CreateModelInternal` + `LLM.CreateResolver` +
+  `Historian` (+ `GeminiAi` for symmetry) (<<i1>>) — breaking for implementers; warrants the minor bump.
+. **Build:** delete dead `<AssemblyVersion>` line; tag `0.6.0` (<<i3>>).
+. **Docs:** update `CLAUDE.md` test commands (<<i4>>).

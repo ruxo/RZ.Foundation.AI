@@ -7,12 +7,12 @@
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
-    <PackageVersion Include="OpenAI" Version="2.10.0" />
-    <PackageVersion Include="Google_GenerativeAI" Version="3.6.6" />
-    <PackageVersion Include="RZ.Foundation.Validation" Version="0.3.1" />
+    <PackageVersion Include="OpenAI" Version="2.12.0" />
+    <PackageVersion Include="Google_GenerativeAI" Version="3.6.7" />
+    <PackageVersion Include="RZ.Foundation.Validation" Version="0.4.0" />
     <!-- Test -->
-    <PackageVersion Include="TUnit" Version="1.45.22" />
+    <PackageVersion Include="TUnit" Version="1.63.0" />
   </ItemGroup>
 </Project>
