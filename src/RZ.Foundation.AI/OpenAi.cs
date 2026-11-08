@@ -28,20 +28,20 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
     public const string GPT_4O = "gpt-4o";
 
     static readonly Map<string, CostStructure> RateTable = LanguageExt.Prelude.Map(
-            (GPT_5_NANO, CostStructure.Simple(0.05m, 0.4m)),
-            (GPT_41_NANO, CostStructure.Simple(0.10m, 0.4m)),
-            (GPT_4O_MINI, CostStructure.Simple(0.15m, 0.6m)),
-            (GPT_54_NANO, CostStructure.Simple(0.20m, 1.25m)),
-            (GPT_41_MINI, CostStructure.Simple(0.40m, 1.6m)),
-            (GPT_5_MINI, CostStructure.Simple(0.25m, 2.0m)),
-            (GPT_54_MINI, CostStructure.Simple(0.75m, 4.5m)),
-            (GPT_41, CostStructure.Simple(2.00m, 8.0m)),
-            (GPT_5, CostStructure.Simple(1.25m, 10.0m)),
-            (GPT_51, CostStructure.Simple(1.25m, 10.0m)),
-            (GPT_4O, CostStructure.Simple(2.50m, 10.0m)),
+            (GPT_5_NANO, CostStructure.Simple(0.05m, 0.4m, cachedInput: 0.005m)),
+            (GPT_41_NANO, CostStructure.Simple(0.10m, 0.4m, cachedInput: 0.025m)),
+            (GPT_4O_MINI, CostStructure.Simple(0.15m, 0.6m, cachedInput: 0.075m)),
+            (GPT_54_NANO, CostStructure.Simple(0.20m, 1.25m, cachedInput: 0.02m)),
+            (GPT_41_MINI, CostStructure.Simple(0.40m, 1.6m, cachedInput: 0.10m)),
+            (GPT_5_MINI, CostStructure.Simple(0.25m, 2.0m, cachedInput: 0.025m)),
+            (GPT_54_MINI, CostStructure.Simple(0.75m, 4.5m, cachedInput: 0.075m)),
+            (GPT_41, CostStructure.Simple(2.00m, 8.0m, cachedInput: 0.50m)),
+            (GPT_5, CostStructure.Simple(1.25m, 10.0m, cachedInput: 0.125m)),
+            (GPT_51, CostStructure.Simple(1.25m, 10.0m, cachedInput: 0.125m)),
+            (GPT_4O, CostStructure.Simple(2.50m, 10.0m, cachedInput: 1.25m)),
 
-            (GPT_54, new CostStructure(new(2.5m, 15m), 272_000, new(5m, 22.5m), ChatCost.Zero)),
-            (GPT_55, new CostStructure(new(5.0m, 30m), 272_000, new(10m, 45m), ChatCost.Zero))
+            (GPT_54, new TieredCostStructure(272_000, new(2.5m, 15m, 15m, 0.25m), new(5m, 22.5m, 22.5m, 0.50m))),
+            (GPT_55, new TieredCostStructure(272_000, new(5.0m, 30m, 30m, 0.50m), new(10m, 45m, 45m, 1.00m)))
         );
 
     public static readonly IReadOnlyList<string> SupportedModels = RateTable.Keys.ToArray().AsReadOnly();
@@ -54,7 +54,7 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         => CreateModelInternal(model, tools?.Select(ToChatTool) ?? [], cp);
 
     public OpenAiFunc CreateNative(string model, HttpClient? http = null) {
-        var rate = RateTable.Find(model).ToNullable() ?? CostStructure.Simple(0, 0);
+        var rate = GetRate(model);
         return CreateNative(model, rate, http);
     }
 
@@ -68,13 +68,23 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
                 return cancel.IsCancellationRequested ? new ErrorInfo(Cancelled, "OpenAI completion cancelled") : e.Trace();
 
             var usage = completion.Value.Usage;
-            var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount, 0);
+            var cost = CalcCost(rate, usage);
             var entryIndex = 0;
             if (Fail(ReadResult(clock ?? TimeProvider.System, GetCost, completion), out e, out var result)) return e.Trace();
             return (result, cost);
 
             ChatCost GetCost() => entryIndex++ == 0 ? cost : ChatCost.Zero;
         };
+    }
+
+    internal static CostStructure GetRate(string model)
+        => RateTable.Find(model).IfNone(CostStructure.Simple(0, 0));
+
+    internal static ChatCost CalcCost(CostStructure rate, ChatTokenUsage usage) {
+        // OpenAI includes reasoning in output; retain it once, in Other, at its configured rate.
+        var reasoning = usage.OutputTokenDetails?.ReasoningTokenCount ?? 0;
+        return LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount - reasoning, reasoning,
+                            usage.InputTokenDetails?.CachedTokenCount ?? 0);
     }
 
     AiChatFunc CreateModelInternal(string model, IEnumerable<ChatTool> tools, AgentCommonParameters? cp = null) {

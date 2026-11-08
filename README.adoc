@@ -16,6 +16,42 @@ This library provides a unified interface for interacting with different AI serv
 * Cost tracking for AI requests
 * Multiple model support
 
+== Cost estimates
+
+Each `ChatCost` contains Input, Output, and Other snapshots. Each snapshot is a `TokenCost` with
+`Tokens` (long) and `Usd` (decimal). `Total` is computed by adding all three buckets. Zero tokens or
+zero USD are independently valid; adding snapshots preserves both supplied values without repricing them.
+
+Thought/reasoning usage belongs to Other. OpenAI reasoning is removed from its inclusive output count
+before it is recorded in Other; Gemini's separate thought count goes directly to Other. A call's cost
+stays on its first generated transcript entry, with zero on subsequent entries from that call.
+
+Rates are USD per million tokens, represented by `ChatRate` and selected by a flat or tiered
+`CostStructure`. `CostStructure.Simple(input, output)` defaults Other to the output rate; supply the
+optional third rate or use `WithThought` when Other has a different price. Tiered pricing selects all
+bucket rates from the input count, using the higher rates only above the configured threshold.
+
+OpenAI and Gemini cached-input counts use the selected cached-input rate. Input.Tokens
+still includes all input tokens. Supply cachedInput to CostStructure.Simple or WithThought for a custom
+cached price; omission uses the ordinary input price. Direct ChatRate construction requires all three
+ordinary bucket prices and optionally accepts a fourth cached-input price.
+Omitting `CachedInputUsdPerMillion` in JSON also uses the ordinary input price. An explicit zero
+is preserved.
+
+TokenCost counts and amounts and all ChatRate prices must be nonnegative. Constructors reject negatives;
+properties are read-only. Zero tokens with positive USD and positive tokens with zero USD are valid.
+The pricing-policy family is closed to flat and tiered policies; callers can supply their rates.
+
+This is a breaking cost-contract change: the previous decimal Input/Output satang amounts are replaced
+by token-and-USD snapshots. The fixed USD-to-satang conversion is removed.
+
+Models absent from the built-in price table are allowed. If no explicit rates are supplied, the library
+uses zero rates and reports a zero cost. Zero is a valid cost; it does not guarantee that the provider's
+request was free.
+
+Callers that need an estimate for such a model can supply a `CostStructure` through the overload accepting
+explicit rates. The library does not reject a call solely because built-in pricing is missing.
+
 == Installation
 
 Add the NuGet package:

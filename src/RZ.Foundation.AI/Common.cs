@@ -25,32 +25,6 @@ public enum ChatRole
     Marker, Admin, ToolOutput
 }
 
-/// <summary>
-///
-/// </summary>
-/// <param name="Input">Cost of input tokens per one million</param>
-/// <param name="Output">Cost of output tokens per one million</param>
-public readonly record struct ChatCost(decimal Input, decimal Output)
-{
-    public static readonly ChatCost Zero = new(0, 0);
-
-    /// <summary>
-    /// Return price per million tokens
-    /// </summary>
-    public decimal CalcInput(int tokens) => Input * tokens / 1_000_000m;
-
-    /// <summary>
-    /// Return price per million tokens
-    /// </summary>
-    public decimal CalcOutput(int tokens) => Output * tokens / 1_000_000m;
-
-    [JsonIgnore]
-    public decimal Total => Input + Output;
-
-    public static ChatCost operator +(ChatCost a, ChatCost b)
-        => new(a.Input + b.Input, a.Output + b.Output);
-}
-
 public readonly record struct ToolRequest(string Id, string Function, JsonNode? Arguments);
 public readonly record struct ToolResponse(string Id, JsonNode Response);
 
@@ -90,17 +64,6 @@ public abstract record ChatMessage
 public sealed record ChatEntry(DateTimeOffset Timestamp, ChatMessage Message, string? Admin, ChatCost Cost);
 
 public delegate AgentResponse AiChatFunc(IEnumerable<ChatMessage> messages);
-
-public readonly record struct CostStructure(ChatCost Text, int InputThreshold, ChatCost HighText, ChatCost Thought)
-{
-    [Pure]
-    public static CostStructure Simple(decimal input, decimal output)
-        => new(ChatCost.Zero, 0, new ChatCost(input, output), ChatCost.Zero);
-
-    [Pure]
-    public static CostStructure WithThought(decimal input, decimal output, decimal thought)
-        => new(ChatCost.Zero, 0, new ChatCost(input, output), new(0, thought));
-}
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(StringType), "string")]

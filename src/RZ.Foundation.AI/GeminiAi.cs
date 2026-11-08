@@ -30,7 +30,7 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
 
     public AiChatFunc CreateModel(string model, in AgentCommonParameters? cp = null) {
         var effectiveModel = model == "gemini-2.5-flash" ? GEMINI_25_FLASH : model;
-        var rate = RateTable.Find(effectiveModel).ToNullable() ?? CostStructure.Simple(0.0m, 0.0m);
+        var rate = RateTable.Find(effectiveModel).IfNone(CostStructure.Simple(0.0m, 0.0m));
         return CreateModel(effectiveModel, rate, cp);
     }
 
@@ -61,7 +61,8 @@ public class GeminiAi(string apiKey, HttpClient? http = null, ILogger? logger = 
             if (result.UsageMetadata is not { } meta) return new ErrorInfo(Unhandled, "No usage metadata");
             if (result.Candidates is null) return new ErrorInfo(Unhandled, "No candidates");
 
-            var cost = LLM.CalcCost(rate, meta.PromptTokenCount, meta.CandidatesTokenCount, meta.ThoughtsTokenCount);
+            var cost = LLM.CalcCost(rate, meta.PromptTokenCount, meta.CandidatesTokenCount, meta.ThoughtsTokenCount,
+                                    meta.CachedContentTokenCount);
             var entryIndex = 0;
             var now = (clock ?? TimeProvider.System).GetLocalNow();
             var entriesResult = result.Candidates.SelectMany(h => {

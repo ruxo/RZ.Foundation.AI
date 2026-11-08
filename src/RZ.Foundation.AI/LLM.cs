@@ -5,8 +5,6 @@ namespace RZ.Foundation.AI;
 
 public static class LLM
 {
-    public const decimal USD2Satang = 38_00m;
-
     /// <summary>Most rounds of tool calls the resolver runs for one reply. A round is one chat reply that carries tool calls.</summary>
     public const int MAX_ROUNDS = 20;
 
@@ -17,12 +15,19 @@ public static class LLM
     public const string TOOL_LOOP = "tool-loop";
 
     [Pure]
-    public static ChatCost CalcCost(CostStructure rate, int input, int output, int thought) {
-        var inputRate = input >= rate.InputThreshold ? rate.HighText : rate.Text;
-        var inputCost = USD2Satang * inputRate.CalcInput(input);
-        var outputRate = output >= rate.InputThreshold ? rate.HighText : rate.Text;
-        var outputCost = USD2Satang * (outputRate.CalcOutput(output) + rate.Thought.CalcOutput(thought));
-        return new(inputCost, outputCost);
+    public static ChatCost CalcCost(CostStructure rate, long input, long output, long other, long cachedInput = 0) {
+        ArgumentOutOfRangeException.ThrowIfNegative(input);
+        ArgumentOutOfRangeException.ThrowIfNegative(output);
+        ArgumentOutOfRangeException.ThrowIfNegative(other);
+        ArgumentOutOfRangeException.ThrowIfNegative(cachedInput);
+        if (cachedInput > input) throw new ArgumentOutOfRangeException(nameof(cachedInput));
+
+        var selected = rate.RateFor(input);
+        var inputUsd = ((input - cachedInput) * selected.InputUsdPerMillion
+                        + cachedInput * selected.CachedInputUsdPerMillion) / 1_000_000m;
+        return new(new(input, inputUsd),
+                   new(output, selected.OutputUsdPerMillion * output / 1_000_000m),
+                   new(other, selected.OtherUsdPerMillion * other / 1_000_000m));
     }
 
     public static AiChatFunc CreateResolver(AiChatFunc chat, IReadOnlyList<ToolWrapper> wrappers, TimeProvider? clock = null)

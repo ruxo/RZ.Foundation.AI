@@ -19,8 +19,8 @@ public class OpenAiTests
 
         Console.WriteLine($"Cost: {cost}");
 
-        await Assert.That(cost.Input).IsGreaterThan(0m);
-        await Assert.That(cost.Output).IsGreaterThan(0m);
+        await Assert.That(cost.Input.Usd).IsGreaterThan(0m);
+        await Assert.That(cost.Output.Usd).IsGreaterThan(0m);
         await Assert.That(response.Count).IsEqualTo(1).Because($"but {response}");
         await Assert.That(response[0].Cost).IsEqualTo(cost);
 
@@ -42,8 +42,8 @@ public class OpenAiTests
 
         Console.WriteLine($"Cost: {cost}");
 
-        await Assert.That(cost.Input).IsGreaterThan(0m);
-        await Assert.That(cost.Output).IsGreaterThan(0m);
+        await Assert.That(cost.Input.Usd).IsGreaterThan(0m);
+        await Assert.That(cost.Output.Usd).IsGreaterThan(0m);
         await Assert.That(response.Count).IsEqualTo(1).Because($"but {response}");
         await Assert.That(response[0].Cost).IsEqualTo(cost);
 

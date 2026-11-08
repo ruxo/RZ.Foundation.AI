@@ -22,7 +22,7 @@ public sealed class LLMTests
         await Assert.That(chat.Count).IsEqualTo(1);
         await Assert.That(chat[0].Message).IsTypeOf<ChatMessage.Content>()
                     .And.HasProperty(x => x.Message).IsEqualTo("Hi!");
-        await Assert.That(cost).IsEqualTo(new ChatCost(1, 2));
+        await Assert.That(cost).IsEqualTo(new ChatCost(new(100, 1), new(200, 2), new(30, 0.3m)));
     }
 
     [Test, DisplayName("Tests that the LLM resolver returns the expected result for a valid input with tool call")]
@@ -113,13 +113,13 @@ public sealed class LLMTests
     public async ValueTask ResolverSumsCostAcrossRounds() {
         var tools = new PlanTools();
         var chat = new ScriptedChat([ToolCallOf("a1", "tool_a"), ToolCallOf("b1", "tool_b"), Text("All done")],
-                                    n => new ChatCost(n + 1, 10 * (n + 1)));
+                                    n => new ChatCost(new(100 * (n + 1), n + 1), new(200 * (n + 1), 10 * (n + 1)), new(30 * (n + 1), 0.5m * (n + 1))));
         var resolver = LLM.CreateResolver(chat.Chat, ToolWrapper.From(tools));
 
         var result = await resolver([new ChatMessage.Content(ChatRole.User, "Hello")]);
 
         await Assert.That(Success(result, out var r)).IsTrue();
-        await Assert.That(r.Cost).IsEqualTo(new ChatCost(6, 60));
+        await Assert.That(r.Cost).IsEqualTo(new ChatCost(new(600, 6), new(1200, 60), new(180, 3)));
     }
 
     [Test, DisplayName("MAX_FAILED_ROUNDS consecutive all-error rounds fail the resolver with tool-loop")]
@@ -277,7 +277,7 @@ public sealed class LLMTests
     static ValueTask<Outcome<(IReadOnlyList<ChatEntry>, ChatCost)>> ChatNoCall(IEnumerable<ChatMessage> messages) {
         var now = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero);
         ChatEntry[] entry = [new(now, new ChatMessage.Content(ChatRole.Agent, "Hi!"), Admin: null, ChatCost.Zero)];
-        return new((entry, new ChatCost(1, 2)));
+        return new((entry, new ChatCost(new(100, 1), new(200, 2), new(30, 0.3m))));
     }
 
     static ValueTask<Outcome<(IReadOnlyList<ChatEntry>, ChatCost)>> ChatToolCall(IEnumerable<ChatMessage> messages) {
