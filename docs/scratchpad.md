@@ -2,13 +2,12 @@
 
 ## 2026-11-08 — Cost model and calculation review
 
-The user specified `docs/IN-PROGRESS` for this task's design or plan. The design draft is
-`docs/IN-PROGRESS/RA-311-design.adoc`. This is the design stage; an implementation plan can follow once the
-remaining design decisions are settled.
+The RA-311 library implementation is in commit `3716129`. The enduring description is in
+[the library design](design.adoc). This scratchpad retains the rationale and verification history.
 
 The user accepted `TokenCost` as the name for the tokens-and-USD pair and preferred its descriptive name to
 the shorter `Cost`. The chat amount has Input, Output, and Other, each a `TokenCost`. Thought usage and its
-amount belong to Other. The price-rate type is separate; `ChatRate` is currently a proposal.
+amount belong to Other. The design separates prices into `ChatRate`.
 
 The existing `ChatCost` serves both as a USD-per-million rate in `CostStructure` and as an incurred satang
 amount. The revision separates those meanings and retains the provider usage that is currently dropped.
@@ -152,3 +151,13 @@ round trip with default-value omission and camel-case naming.
 
 After the fix all 86 offline unit tests passed, the Release solution built, and the source/test diff
 whitespace check passed. No commit or push was performed.
+
+## 2026-11-09 — Library design handoff
+
+The durable design covers the chat contract, provider adapters, tool resolver, cost snapshots, pricing,
+and JSON. The completed library check was a Release build with 96 unit tests and 7 Foundation tests
+passing. The 5 live-provider tests were skipped by their existing configuration.
+
+Gemini passes reported cached input to the calculator. Its built-in model and price refresh is a
+follow-up. [RA-317](https://pace6.atlassian.net/browse/RA-317) records the pre-existing GPT-5.1
+pricing lookup typo.

@@ -4,6 +4,8 @@
 
 This library provides a unified interface for interacting with different AI services.
 
+See the link:docs/design.adoc[library design] for the chat contract, provider adapters, and cost model.
+
 == Support
 
 * Open AI
@@ -42,9 +44,6 @@ TokenCost counts and amounts and all ChatRate prices must be nonnegative. Constr
 properties are read-only. Zero tokens with positive USD and positive tokens with zero USD are valid.
 The pricing-policy family is closed to flat and tiered policies; callers can supply their rates.
 
-This is a breaking cost-contract change: the previous decimal Input/Output satang amounts are replaced
-by token-and-USD snapshots. The fixed USD-to-satang conversion is removed.
-
 Models absent from the built-in price table are allowed. If no explicit rates are supplied, the library
 uses zero rates and reports a zero cost. Zero is a valid cost; it does not guarantee that the provider's
 request was free.
@@ -61,56 +60,48 @@ Add the NuGet package:
 dotnet add package RZ.Foundation.AI
 ----
 
-== Usages
+== Usage
 
-=== Simple Chat Example
-
-[source,csharp]
-----
-using RZ.Foundation.AI;
-
-var chat = new OpenAi("(api key)").CreateModel(OpenAi.gpt_4o_mini);
-
-// or using Gemini AI
-// var chat = new GeminiAi("(api key)").CreateModel(GeminiAi.gemini_20_flash);
-
-var message = new ChatMessage.Content(ChatRole.User, "Hello");
-var (response, cost) = await chat([message]);
-
-Console.WriteLine($"Chat cost = {cost}");
-foreach(var entry in response)
-    Console.WriteLine($"\t{entry}");
-
-var history = [message].Concat(response);
-
-message = new ChatMessage.Content(ChatRole.User, "How are you?");
-(response, cost) = await chat(history.Append(message));
-
-history = history.Concat(response);
-----
-
-=== Chat with Tools
+=== Chat with conversation history
 
 [source,csharp]
 ----
+using System;
 using RZ.Foundation.AI;
+using static RZ.Foundation.AOT.Prelude;
+
+var chat = new OpenAi("(api key)").CreateModel(OpenAi.GPT_41_NANO);
+var conversation = new Historian(chat);
+
+var (entries, cost) = await ThrowIfError(conversation.Invoke("Hello"));
+foreach (var entry in entries)
+    Console.WriteLine(entry.Message);
+
+Console.WriteLine($"Tokens = {cost.Total.Tokens}, USD = {cost.Total.Usd}");
+
+(entries, cost) = await ThrowIfError(conversation.Invoke("How are you?"));
+----
+
+=== Chat with tools
+
+[source,csharp]
+----
+using System.Linq;
+using RZ.Foundation.AI;
+using static RZ.Foundation.AOT.Prelude;
+
+var tools = ToolWrapper.FromType(typeof(SampleTool));
+var definitions = tools.Select(tool => tool.Definition).ToArray();
+var chat = new OpenAi("(api key)").CreateModel(OpenAi.GPT_41_NANO, definitions);
+var resolver = LLM.CreateResolver(chat, tools);
+
+var (entries, cost) = await ThrowIfError(resolver([
+    new ChatMessage.Content(ChatRole.User, "Calculate 123 + 456 using the provided tool")
+]));
 
 static class SampleTool
 {
     [AiToolName("add_two_numbers")]
     public static int Add(int a, int b) => a + b;
 }
-
-var chat = new OpenAi("(api key)").CreateModel(OpenAi.gpt_4o_mini);
-
-// or using Gemini AI
-// var chat = new GeminiAi("(api key)").CreateModel(GeminiAi.gemini_20_flash);
-
-var tools = ToolWrapper.FromType(typeof(SampleTool));
-
-var resolver = LLM.CreateResolver(chat, tools);
-
-var message = new ChatMessage.Content(ChatRole.User, "Calculate 123 + 456 using the provided tool");
-var (response, cost) = await resolver([message]);
-// simply use `resolver` just like using `chat`
 ----

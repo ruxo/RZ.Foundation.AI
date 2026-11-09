@@ -1,0 +1,161 @@
+= RZ.Foundation.AI library design
+:toc:
+
+RZ.Foundation.AI adapts OpenAI and Gemini chat APIs to a shared .NET contract. It translates messages
+and provider results, estimates the cost of each model call, and can run a tool loop around a chat function.
+
+== Chat contract
+
+`AiChatFunc` takes an ordered sequence of `ChatMessage` values and returns an asynchronous
+`Outcome<(IReadOnlyList<ChatEntry> Chat, ChatCost Cost)>`. On success, the entries describe the
+model work in order and the cost describes the complete invocation. A failure carries `ErrorInfo`.
+
+`ChatMessage` represents text, multimodal content, tool calls, and tool results. Content messages
+carry a role. Tool requests identify the call, function, and JSON arguments. A `ChatEntry` records a
+message with its timestamp, optional admin metadata, and attributed cost.
+
+The caller supplies the conversation context. `Historian` is an optional in-memory wrapper that
+adds each incoming message to its history and appends response messages after a successful call.
+It accepts the same chat function contract as a direct caller.
+
+link:../src/RZ.Foundation.AI/Common.cs[Shared types] |
+link:../src/RZ.Foundation.AI/Historian.cs[History wrapper]
+
+== Provider adapters
+
+Both adapters expose model factories returning `AiChatFunc`. Their native factories expose provider
+options or requests while returning the same entry and cost result. The adapters select model pricing,
+translate requests, and map provider usage to the shared cost representation.
+
+[cols="1,3",options="header"]
+|===
+|Adapter |Supported chat paths
+
+|OpenAI
+|Converts text and supported multimodal input, sends tool definitions to the model, and turns completions
+into text or tool-call entries. The native delegate accepts completion options and a cancellation token.
+
+|Gemini
+|Converts text history into content and an optional system instruction. The native delegate accepts a
+generate-content request. Candidate text becomes entries, with token usage taken from response metadata.
+|===
+
+The adapters return handled provider and response errors as ErrorInfo. They
+attach a call's snapshot to its first generated entry and use zero on subsequent entries from that call.
+
+link:../src/RZ.Foundation.AI/OpenAi.cs[OpenAI adapter] |
+link:../src/RZ.Foundation.AI/GeminiAi.cs[Gemini adapter]
+
+== Tool execution
+
+A caller wraps selected methods with `ToolWrapper` and supplies their definitions to a tool-capable
+chat function. Methods marked with `AiToolName` can be discovered from a type or instance. The wrapper
+derives the parameter schema from the method signature, binds JSON arguments, and invokes the method.
+
+`LLM.CreateResolver` wraps that chat function and the registered tools in another `AiChatFunc`. It
+collects model entries and cost each round. If the model requests tools, the resolver runs the
+registered calls concurrently, appends their results to the returned entries and the next round's
+context, then calls the model again. Local tool-result entries have zero model cost.
+
+Unknown tools and argument errors become tool results the model can respond to. Tool execution
+failures can terminate the invocation. The resolver bounds tool-call rounds and consecutive rounds
+in which every tool result is an error. It returns a `tool-loop` error when either budget is exhausted.
+
+The successful flow through the resolver is shown below. A caller can also invoke the adapter directly
+for a single model round.
+
+[plantuml,foundation-ai-chat-flow,svg]
+----
+@startuml
+actor Caller
+participant "LLM resolver" as Resolver
+participant "Provider adapter" as Adapter
+participant "Provider API" as Provider
+participant "Registered tools" as Tools
+
+Caller -> Resolver : Invoke with conversation messages
+activate Resolver
+loop Each model round
+  Resolver -> Adapter : Invoke with current history
+  activate Adapter
+  Adapter -> Provider : Request a completion
+  activate Provider
+  Provider --> Adapter : Reply and usage
+  deactivate Provider
+  note over Adapter
+    Map usage and estimate cost.
+    Attribute cost to the first generated entry.
+  end note
+  Adapter --> Resolver : Ordered entries and round cost
+  deactivate Adapter
+  note over Resolver : Collect entries and add round cost
+  opt Model requests tools within budget
+    Resolver -> Tools : Invoke requested tools concurrently
+    activate Tools
+    Tools --> Resolver : Tool results
+    deactivate Tools
+    note over Resolver : Append results to entries and history
+  end
+end
+Resolver --> Caller : Ordered entries and aggregate cost
+deactivate Resolver
+@enduml
+----
+
+link:../src/RZ.Foundation.AI/LLM.cs[Resolver and calculator] |
+link:../src/RZ.Foundation.AI/ToolWrapper.cs[Tool binding and invocation]
+
+== Cost snapshots and pricing
+
+`TokenCost` pairs a nonnegative 64-bit token count with a nonnegative decimal USD amount. Each
+value is independently valid at zero. `ChatCost` has three disjoint buckets, Input, Output, and Other.
+Thought and reasoning usage belongs to Other. Addition sums each bucket's tokens and dollars.
+`Total` is computed from the three buckets. Captured USD amounts are preserved during aggregation.
+
+`ChatRate` holds USD-per-million-token rates for Input, Output, Other, and cached input. A closed
+`CostStructure` policy selects one set of rates. A flat policy uses one rate set. A tiered policy
+switches to its higher set when total input exceeds its threshold. Callers can supply either policy
+to the provider overloads that accept explicit rates.
+
+The adapters use reported usage to estimate the amount. OpenAI's reasoning count is included in
+reported output and is moved to Other before pricing. Gemini reports thoughts separately. Both
+adapters pass the reported cached subset to the calculator. Input retains the total count and its
+USD amount combines the ordinary and cached portions.
+
+[source,text]
+----
+Input.Usd = ((totalInput - cachedInput) * inputRate + cachedInput * cachedInputRate) / 1,000,000
+----
+
+OpenAI's built-in pricing includes cached rates. Gemini's built-in entries use the ordinary input
+rate and callers can supply a distinct cached rate. An omitted cached rate defaults to ordinary input
+pricing. Models without configured pricing may still run. They use zero rates and retain reported
+token counts.
+
+On a successful direct call, the result contains the full call cost. The resolver adds each round's
+cost to its result. Entry costs provide attribution within those results.
+
+link:../src/RZ.Foundation.AI/Cost.cs[Snapshot and rate types] |
+link:../src/RZ.Foundation.AI/LLM.cs[Calculation and aggregation]
+
+== JSON representation
+
+Messages and content use a `kind` discriminator for their variants. A cost snapshot requires all
+three buckets, each with its token count and USD amount. The default property names give this shape.
+
+[source,json]
+----
+{
+  "Input":  { "Tokens": 1000, "Usd": 0.0025 },
+  "Output": { "Tokens": 200,  "Usd": 0.003 },
+  "Other":  { "Tokens": 0,    "Usd": 0 }
+}
+----
+
+The serializer emits required fields at zero and omits the computed total. Deserialization checks
+the required fields and constructs the immutable values through their checked constructors.
+Rate JSON requires the ordinary Input, Output, and Other prices. The cached-input price is optional.
+An omitted cached-input price uses the ordinary input rate. An explicit zero is preserved.
+
+link:../src/RZ.Foundation.AI/TokenCostJsonConverter.cs[Token snapshot conversion] |
+link:../src/RZ.Foundation.AI/ChatRateJsonConverter.cs[Rate conversion]
