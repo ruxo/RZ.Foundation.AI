@@ -3,6 +3,16 @@ using System.Text.Json.Nodes;
 
 namespace RZ.Foundation.AI;
 
+public delegate ValueTask<ChatResolution> ResolvedChatFunc(IEnumerable<ChatMessage> messages);
+
+public abstract record ChatResolution
+{
+    ChatResolution() { }
+
+    public sealed record Completed(IReadOnlyList<ChatEntry> Entries, ChatCost Cost) : ChatResolution;
+    public sealed record Failed(ErrorInfo Error, ChatCost Cost) : ChatResolution;
+}
+
 public static class LLM
 {
     /// <summary>Most rounds of tool calls the resolver runs for one reply. A round is one chat reply that carries tool calls.</summary>
@@ -30,7 +40,17 @@ public static class LLM
                    new(other, selected.OtherUsdPerMillion * other / 1_000_000m));
     }
 
-    public static AiChatFunc CreateResolver(AiChatFunc chat, IReadOnlyList<ToolWrapper> wrappers, TimeProvider? clock = null)
+    public static AiChatFunc CreateResolver(AiChatFunc chat, IReadOnlyList<ToolWrapper> wrappers, TimeProvider? clock = null) {
+        var resolve = CreateCostAwareResolver(chat, wrappers, clock);
+        return async messages => (await resolve(messages)) switch {
+            ChatResolution.Completed completed => (completed.Entries, completed.Cost),
+            ChatResolution.Failed failed => failed.Error,
+            _ => throw new System.Diagnostics.UnreachableException()
+        };
+    }
+
+    /// <summary>Resolves tool calls and returns the reported usage from completed model calls even if a later round fails.</summary>
+    public static ResolvedChatFunc CreateCostAwareResolver(AiChatFunc chat, IReadOnlyList<ToolWrapper> wrappers, TimeProvider? clock = null)
         => async messages => {
             var m = Seq(messages);
             var collected = new List<ChatEntry>();
@@ -38,7 +58,8 @@ public static class LLM
             var loop = ToolLoop.Start;
 
             while (true){
-                if (Fail(await chat(m), out var e, out var responses, out var chatCost)) return e.Trace("Chat failed");
+                if (Fail(await chat(m), out var e, out var responses, out var chatCost))
+                    return new ChatResolution.Failed(e.Trace("Chat failed"), cost);
                 collected.AddRange(responses);
                 cost += chatCost;
 
@@ -48,16 +69,16 @@ public static class LLM
                                 from request in tc.Requests
                                 select request).ToArray();
                 if (requests.Length == 0)
-                    return (collected.ToArray(), cost);
+                    return new ChatResolution.Completed(collected.ToArray(), cost);
 
-                if (loop.Rounds == MAX_ROUNDS) return loop.Exceeded(requests[^1].Function);
+                if (loop.Rounds == MAX_ROUNDS) return new ChatResolution.Failed(loop.Exceeded(requests[^1].Function), cost);
 
                 var result = await Task.WhenAll(from request in requests
                                                 select Call(wrappers, request).AsTask());
-                if (Fail(result.MakeList(), out e, out var toolResults)) return e;
+                if (Fail(result.MakeList(), out e, out var toolResults)) return new ChatResolution.Failed(e, cost);
 
                 loop = loop.Next(requests[^1].Function, toolResults);
-                if (loop.FailedRounds == MAX_FAILED_ROUNDS) return loop.Failed();
+                if (loop.FailedRounds == MAX_FAILED_ROUNDS) return new ChatResolution.Failed(loop.Failed(), cost);
 
                 var now = (clock ?? TimeProvider.System).GetUtcNow();
                 collected.AddRange(toolResults.Map(tr => new ChatEntry(now, tr.Result, Admin: null, ChatCost.Zero)));
