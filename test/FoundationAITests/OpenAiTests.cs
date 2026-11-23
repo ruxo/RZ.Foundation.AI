@@ -13,7 +13,7 @@ public class OpenAiTests
     public async ValueTask SimpleChat() {
         Skip.When(!RunTests, "Skipped because `RunTests=false`");
 
-        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_41_NANO);
+        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_6_LUNA);
 
         var (response, cost) = await ThrowIfError(chat([new ChatMessage.Content(ChatRole.User, "Hello")]));
 
@@ -36,7 +36,7 @@ public class OpenAiTests
         var tools = new[] {
             new ToolDefinition("get_today", "Get today's date", [])
         };
-        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_41_NANO, tools);
+        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_6_LUNA, tools);
 
         var (response, cost) = await ThrowIfError(chat([new ChatMessage.Content(ChatRole.User, "What's today?")]));
 
@@ -61,7 +61,7 @@ public class OpenAiTests
         var tools = new[] {
             new ToolDefinition("get_today", "Get today's date", [])
         };
-        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_41_NANO, tools);
+        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_6_LUNA, tools);
 
         var history = new List<ChatMessage> {
             new ChatMessage.Content(ChatRole.User, "What's today?")
@@ -91,7 +91,7 @@ public class OpenAiTests
                 new("b", Description: null, ToolParameterType.Number, null)
             ])
         };
-        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_41_NANO, tools);
+        var chat = new OpenAi(OpenAiApiKey).CreateModel(OpenAi.GPT_6_LUNA, tools);
 
         var history = new List<ChatMessage> {
             new ChatMessage.Content(ChatRole.System, "Use the tool to add numbers."),

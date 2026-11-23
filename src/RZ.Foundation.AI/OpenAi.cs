@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Nodes;
+using System.Text.Json.Nodes;
 using OpenAI.Chat;
 
 namespace RZ.Foundation.AI;
@@ -6,45 +6,9 @@ namespace RZ.Foundation.AI;
 public delegate AgentResponse OpenAiFunc(IEnumerable<ChatMessage> messages, ChatCompletionOptions options, CancellationToken cancel = default);
 
 [PublicAPI]
-public class OpenAi(string apiKey, TimeProvider? clock = null)
+public partial class OpenAi(string apiKey, TimeProvider? clock = null)
 {
-    // See https://developers.openai.com/api/docs/pricing
-    public const string GPT_55 = "gpt-5.5";
 
-    public const string GPT_54 = "gpt-5.4";
-    public const string GPT_54_MINI = "gpt-5.4-mini";
-    public const string GPT_54_NANO = "gpt-5.4-nano";
-
-    public const string GPT_51 = "gpt-51";
-    public const string GPT_5 = "gpt-5";
-    public const string GPT_5_MINI = "gpt-5-mini";
-    public const string GPT_5_NANO = "gpt-5-nano";
-
-    public const string GPT_41_MINI = "gpt-4.1-mini";
-    public const string GPT_41_NANO = "gpt-4.1-nano";
-    public const string GPT_41 = "gpt-4.1";
-
-    public const string GPT_4O_MINI = "gpt-4o-mini";
-    public const string GPT_4O = "gpt-4o";
-
-    static readonly Map<string, CostStructure> RateTable = LanguageExt.Prelude.Map(
-            (GPT_5_NANO, CostStructure.Simple(0.05m, 0.4m, cachedInput: 0.005m)),
-            (GPT_41_NANO, CostStructure.Simple(0.10m, 0.4m, cachedInput: 0.025m)),
-            (GPT_4O_MINI, CostStructure.Simple(0.15m, 0.6m, cachedInput: 0.075m)),
-            (GPT_54_NANO, CostStructure.Simple(0.20m, 1.25m, cachedInput: 0.02m)),
-            (GPT_41_MINI, CostStructure.Simple(0.40m, 1.6m, cachedInput: 0.10m)),
-            (GPT_5_MINI, CostStructure.Simple(0.25m, 2.0m, cachedInput: 0.025m)),
-            (GPT_54_MINI, CostStructure.Simple(0.75m, 4.5m, cachedInput: 0.075m)),
-            (GPT_41, CostStructure.Simple(2.00m, 8.0m, cachedInput: 0.50m)),
-            (GPT_5, CostStructure.Simple(1.25m, 10.0m, cachedInput: 0.125m)),
-            (GPT_51, CostStructure.Simple(1.25m, 10.0m, cachedInput: 0.125m)),
-            (GPT_4O, CostStructure.Simple(2.50m, 10.0m, cachedInput: 1.25m)),
-
-            (GPT_54, new TieredCostStructure(272_000, new(2.5m, 15m, 15m, 0.25m), new(5m, 22.5m, 22.5m, 0.50m))),
-            (GPT_55, new TieredCostStructure(272_000, new(5.0m, 30m, 30m, 0.50m), new(10m, 45m, 45m, 1.00m)))
-        );
-
-    public static readonly IReadOnlyList<string> SupportedModels = RateTable.Keys.ToArray().AsReadOnly();
 
     [Obsolete("Use SupportedModels property instead")]
     public static bool IsModelSupported(string model)
@@ -63,12 +27,13 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
         var ai = new ChatClient(model, apiKey);
 
         return async (messages, options, cancel) => {
+            if (ConfigureModelOptions(model, options) is { } optionError) return optionError;
             if (Fail(await messages.ChooseAsync((x, _, _) => ConvertChatMessageToMessage(http, x)).MakeList(), out var e, out var history)) return e.Trace();
             if (Fail(await TryCatch(ai.CompleteChatAsync(history, options, cancel)), out e, out var completion))
                 return cancel.IsCancellationRequested ? new ErrorInfo(Cancelled, "OpenAI completion cancelled") : e.Trace();
 
             var usage = completion.Value.Usage;
-            var cost = CalcCost(rate, usage);
+            var cost = CalcCost(rate, usage, completion.GetRawResponse().Content);
             var entryIndex = 0;
             if (Fail(ReadResult(clock ?? TimeProvider.System, GetCost, completion), out e, out var result)) return e.Trace();
             return (result, cost);
@@ -80,11 +45,32 @@ public class OpenAi(string apiKey, TimeProvider? clock = null)
     internal static CostStructure GetRate(string model)
         => RateTable.Find(model).IfNone(CostStructure.Simple(0, 0));
 
-    internal static ChatCost CalcCost(CostStructure rate, ChatTokenUsage usage) {
+    internal static ChatCost CalcCost(CostStructure rate, ChatTokenUsage usage, BinaryData? rawResponse = null) {
         // OpenAI includes reasoning in output; retain it once, in Other, at its configured rate.
         var reasoning = usage.OutputTokenDetails?.ReasoningTokenCount ?? 0;
-        return LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount - reasoning, reasoning,
-                            usage.InputTokenDetails?.CachedTokenCount ?? 0);
+        var cached = usage.InputTokenDetails?.CachedTokenCount ?? 0;
+        var cost = LLM.CalcCost(rate, usage.InputTokenCount, usage.OutputTokenCount - reasoning, reasoning, cached);
+        var writes = CacheWriteTokens(rawResponse);
+        ArgumentOutOfRangeException.ThrowIfNegative(writes);
+        if (writes > usage.InputTokenCount - cached)
+            throw new ArgumentOutOfRangeException(nameof(rawResponse), "Cached reads and writes exceed total input tokens.");
+
+        // The ordinary-input charge already includes these tokens; add only the 30-minute write premium.
+        var premium = writes * (rate.RateFor(usage.InputTokenCount).InputUsdPerMillion / 4m) / 1_000_000m;
+        return new ChatCost(new TokenCost(cost.Input.Tokens, cost.Input.Usd + premium), cost.Output, cost.Other);
+    }
+
+    static long CacheWriteTokens(BinaryData? rawResponse) {
+        if (rawResponse is null) return 0;
+        using var json = System.Text.Json.JsonDocument.Parse(rawResponse.ToMemory());
+        return json.RootElement.TryGetProperty("usage", out var usage)
+            && usage.ValueKind == System.Text.Json.JsonValueKind.Object
+            && usage.TryGetProperty("prompt_tokens_details", out var details)
+            && details.ValueKind == System.Text.Json.JsonValueKind.Object
+            && details.TryGetProperty("cache_write_tokens", out var writes)
+            && writes.ValueKind != System.Text.Json.JsonValueKind.Null
+                   ? writes.GetInt64()
+                   : 0;
     }
 
     AiChatFunc CreateModelInternal(string model, IEnumerable<ChatTool> tools, AgentCommonParameters? cp = null) {

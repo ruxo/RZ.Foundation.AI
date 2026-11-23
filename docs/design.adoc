@@ -124,8 +124,12 @@ USD amount combines the ordinary and cached portions.
 
 [source,text]
 ----
-Input.Usd = ((totalInput - cachedInput) * inputRate + cachedInput * cachedInputRate) / 1,000,000
+Input.Usd = ((totalInput - cachedInput - cacheWrites) * inputRate + cachedInput * cachedInputRate + cacheWrites * 1.25 * inputRate) / 1,000,000
 ----
+
+OpenAI cache writes retain their original input token count and are charged at 1.25 times the selected
+input rate, using the Chat Completions 30-minute lifetime. The adapter reads the write count from the raw
+response because the installed SDK does not expose it as a typed property. Missing write metadata means zero writes.
 
 OpenAI's built-in pricing includes cached rates. Gemini's built-in entries use the ordinary input
 rate and callers can supply a distinct cached rate. An omitted cached rate defaults to ordinary input
@@ -159,3 +163,29 @@ An omitted cached-input price uses the ordinary input rate. An explicit zero is 
 
 link:../src/RZ.Foundation.AI/TokenCostJsonConverter.cs[Token snapshot conversion] |
 link:../src/RZ.Foundation.AI/ChatRateJsonConverter.cs[Rate conversion]
+
+== OpenAI model catalogue
+
+The built-in catalogue contains the current general GPT chat model identifiers and Standard USD prices,
+checked on 2026-11-23 against https://developers.openai.com/api/docs/models/all[OpenAI's catalogue],
+https://developers.openai.com/api/docs/pricing[pricing] and
+https://developers.openai.com/api/docs/deprecations[retirement schedule].
+It includes GPT-6.2 Astra, GPT-6.2 Sol, GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol,
+GPT-6 Luna, GPT-5.6 Sol (and its GPT-5.6 alias), GPT-5.6 Terra, GPT-5.6 Luna, GPT-5.5,
+GPT-5.4, GPT-5.4 Mini, GPT-5.2 and `chat-latest`.
+`SupportedModels` orders models from cheapest to most expensive for equal uncached input
+and output token counts at short-context rates, excluding reasoning tokens.
+Deprecated models are absent from SupportedModels and built-in pricing. Legacy public constants remain
+marked obsolete for source compatibility. Unknown models still use zero prices unless the caller supplies a policy.
+
+Rates include cached-input reads. Where documented, the higher policy applies to the whole request only above
+272,000 input tokens. The tables describe Standard processing; callers can supply different rates for other
+processing tiers or regional premiums. GPT-5.6 Sol's currently published price is promotional through
+2026-11-30 and needs checking when that promotion ends.
+
+Model pricing support does not imply support for every endpoint capability. GPT-6.2 Astra, GPT-6.2 Sol, GPT-6 Astra,
+GPT-6.1 Sol and GPT-6.1 Terra require Responses for tool calling; this Chat Completions adapter returns an invalid-request
+error before sending their tool requests. GPT-6 Luna and GPT-6 Sol default tool requests to reasoning effort
+none and refuse an explicitly conflicting effort. Calls without tools preserve their supplied options.
+Models requiring Responses for all calls are outside this catalogue. See
+https://developers.openai.com/api/docs/guides/latest-model[OpenAI's API compatibility guidance].

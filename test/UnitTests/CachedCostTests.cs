@@ -33,10 +33,19 @@ public sealed class CachedCostTests
     [Test]
     public async ValueTask ExistingModelsHaveExplicitCachedPrices() {
         foreach (var (model, price) in new[] {
-            (OpenAi.GPT_5_NANO, 0.005m), (OpenAi.GPT_41_NANO, 0.025m), (OpenAi.GPT_4O_MINI, 0.075m),
-            (OpenAi.GPT_54_NANO, 0.02m), (OpenAi.GPT_41_MINI, 0.10m), (OpenAi.GPT_5_MINI, 0.025m),
-            (OpenAi.GPT_54_MINI, 0.075m), (OpenAi.GPT_41, 0.50m), (OpenAi.GPT_5, 0.125m),
-            (OpenAi.GPT_51, 0.125m), (OpenAi.GPT_4O, 1.25m), (OpenAi.GPT_54, 0.25m), (OpenAi.GPT_55, 0.50m)
+            (OpenAi.GPT_6_ASTRA, 1m),
+            (OpenAi.GPT_61_SOL, 0.1m),
+            (OpenAi.GPT_61_TERRA, 0.05m),
+            (OpenAi.GPT_6_SOL, 0.2m),
+            (OpenAi.GPT_6_LUNA, 0.01m),
+            (OpenAi.GPT_56_SOL, 0.4m),
+            (OpenAi.GPT_56, 0.4m),
+            (OpenAi.GPT_56_TERRA, 0.2m),
+            (OpenAi.GPT_56_LUNA, 0.02m),
+            (OpenAi.GPT_55, 0.5m),
+            (OpenAi.GPT_54, 0.25m),
+            (OpenAi.GPT_54_MINI, 0.075m),
+            (OpenAi.GPT_52, 0.175m)
         }) {
             await Assert.That(OpenAi.CalcCost(OpenAi.GetRate(model), Usage(10000, 10000)).Input)
                         .IsEqualTo(new TokenCost(10000, price * 0.01m));

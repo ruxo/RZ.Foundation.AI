@@ -40,6 +40,10 @@ ordinary bucket prices and optionally accepts a fourth cached-input price.
 Omitting `CachedInputUsdPerMillion` in JSON also uses the ordinary input price. An explicit zero
 is preserved.
 
+OpenAI cache-write counts are included in Input.Tokens once. Their USD charge uses 1.25 times the
+selected input rate for Chat Completions' 30-minute cache lifetime. Older responses without write
+metadata retain their existing calculation.
+
 TokenCost counts and amounts and all ChatRate prices must be nonnegative. Constructors reject negatives;
 properties are read-only. Zero tokens with positive USD and positive tokens with zero USD are valid.
 The pricing-policy family is closed to flat and tiered policies; callers can supply their rates.
@@ -50,6 +54,12 @@ request was free.
 
 Callers that need an estimate for such a model can supply a `CostStructure` through the overload accepting
 explicit rates. The library does not reject a call solely because built-in pricing is missing.
+
+== OpenAI model catalogue
+
+The current model list, Standard pricing scope, retirement handling and Chat Completions tool restrictions
+are described in link:docs/design.adoc#_openai_model_catalogue[the model catalogue design].
+Deprecated models are excluded from SupportedModels; their public constants remain marked obsolete.
 
 == Installation
 
@@ -70,7 +80,7 @@ using System;
 using RZ.Foundation.AI;
 using static RZ.Foundation.AOT.Prelude;
 
-var chat = new OpenAi("(api key)").CreateModel(OpenAi.GPT_41_NANO);
+var chat = new OpenAi("(api key)").CreateModel(OpenAi.GPT_6_LUNA);
 var conversation = new Historian(chat);
 
 var (entries, cost) = await ThrowIfError(conversation.Invoke("Hello"));
@@ -92,7 +102,7 @@ using static RZ.Foundation.AOT.Prelude;
 
 var tools = ToolWrapper.FromType(typeof(SampleTool));
 var definitions = tools.Select(tool => tool.Definition).ToArray();
-var chat = new OpenAi("(api key)").CreateModel(OpenAi.GPT_41_NANO, definitions);
+var chat = new OpenAi("(api key)").CreateModel(OpenAi.GPT_6_LUNA, definitions);
 var resolver = LLM.CreateResolver(chat, tools);
 
 var (entries, cost) = await ThrowIfError(resolver([
