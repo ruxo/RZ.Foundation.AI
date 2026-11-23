@@ -24,7 +24,7 @@ public partial class OpenAi
     [Obsolete("This model is retired or deprecated; use a current SupportedModels entry.")]
     public const string GPT_54_NANO = "gpt-5.4-nano";
     [Obsolete("This model is retired or deprecated; use a current SupportedModels entry.")]
-    public const string GPT_51 = "gpt-51";
+    public const string GPT_51 = "gpt-5.1";
     [Obsolete("This model is retired or deprecated; use a current SupportedModels entry.")]
     public const string GPT_5 = "gpt-5";
     [Obsolete("This model is retired or deprecated; use a current SupportedModels entry.")]
@@ -61,6 +61,22 @@ public partial class OpenAi
         (GPT_62_ASTRA, new TieredCostStructure(272_000, new(8m, 40m, 40m, 0.4m), new(16m, 60m, 60m, 0.8m))),
         (GPT_6_ASTRA, new TieredCostStructure(272_000, new(10m, 50m, 50m, 1m), new(20m, 75m, 75m, 2m)))
     );
+
+    // Configured deployments can still call these models and record their costs during migration.
+#pragma warning disable CS0618
+    static readonly Map<string, CostStructure> DeprecatedRateTable = LanguageExt.Prelude.Map(
+        (GPT_5_NANO, CostStructure.Simple(0.05m, 0.4m, cachedInput: 0.005m)),
+        (GPT_41_NANO, CostStructure.Simple(0.10m, 0.4m, cachedInput: 0.025m)),
+        (GPT_4O_MINI, CostStructure.Simple(0.15m, 0.6m, cachedInput: 0.075m)),
+        (GPT_54_NANO, CostStructure.Simple(0.20m, 1.25m, cachedInput: 0.02m)),
+        (GPT_41_MINI, CostStructure.Simple(0.40m, 1.6m, cachedInput: 0.10m)),
+        (GPT_5_MINI, CostStructure.Simple(0.25m, 2m, cachedInput: 0.025m)),
+        (GPT_41, CostStructure.Simple(2m, 8m, cachedInput: 0.50m)),
+        (GPT_5, CostStructure.Simple(1.25m, 10m, cachedInput: 0.125m)),
+        (GPT_51, CostStructure.Simple(1.25m, 10m, cachedInput: 0.125m)),
+        (GPT_4O, CostStructure.Simple(2.50m, 10m, cachedInput: 1.25m))
+    );
+#pragma warning restore CS0618
 
     public static readonly IReadOnlyList<string> SupportedModels = RateTable.Keys
         .OrderBy(model => {

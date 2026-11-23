@@ -17,11 +17,23 @@ public sealed class OpenAiModelTests
     }
 
     [Test]
-    public async ValueTask RetiredModelsAreAbsentFromTheSelectableCatalogue() {
+    public async ValueTask DeprecatedModelsAreAbsentFromTheSelectableCatalogue() {
         foreach (var model in new[] { "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.1", "gpt-51", "gpt-5.4-nano" })
             await Assert.That(OpenAi.SupportedModels.Contains(model)).IsFalse();
         foreach (var model in new[] { "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2", "gpt-6.2-astra", "gpt-6.2-sol", "chat-latest" })
             await Assert.That(OpenAi.SupportedModels.Contains(model)).IsTrue().Because(model);
+    }
+
+    [Test]
+    public async ValueTask ConfiguredDeprecatedModelsRemainUsableAndPriced() {
+#pragma warning disable CS0618
+        foreach (var model in new[] { OpenAi.GPT_4O, OpenAi.GPT_4O_MINI, OpenAi.GPT_41, OpenAi.GPT_41_MINI, OpenAi.GPT_41_NANO, OpenAi.GPT_5, OpenAi.GPT_5_MINI, OpenAi.GPT_5_NANO, OpenAi.GPT_51, OpenAi.GPT_54_NANO })
+            await Assert.That(OpenAi.IsModelSupported(model)).IsTrue().Because(model);
+        await Assert.That(OpenAi.IsModelSupported("gpt-51")).IsFalse();
+        var cost = LLM.CalcCost(OpenAi.GetRate(OpenAi.GPT_4O_MINI), 1000, 200, 0, 100);
+#pragma warning restore CS0618
+        await Assert.That(cost.Input).IsEqualTo(new TokenCost(1000, 0.0001425m));
+        await Assert.That(cost.Output).IsEqualTo(new TokenCost(200, 0.00012m));
     }
 
     [Test]

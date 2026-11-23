@@ -10,9 +10,9 @@ public partial class OpenAi(string apiKey, TimeProvider? clock = null)
 {
 
 
-    [Obsolete("Use SupportedModels property instead")]
+    [Obsolete("Use SupportedModels for new model selections. This method also accepts deprecated models.")]
     public static bool IsModelSupported(string model)
-        => RateTable.ContainsKey(model);
+        => RateTable.ContainsKey(model) || DeprecatedRateTable.ContainsKey(model);
 
     public AiChatFunc CreateModel(string model, IReadOnlyList<ToolDefinition>? tools = null, AgentCommonParameters? cp = null)
         => CreateModelInternal(model, tools?.Select(ToChatTool) ?? [], cp);
@@ -43,7 +43,7 @@ public partial class OpenAi(string apiKey, TimeProvider? clock = null)
     }
 
     internal static CostStructure GetRate(string model)
-        => RateTable.Find(model).IfNone(CostStructure.Simple(0, 0));
+        => RateTable.Find(model).IfNone(() => DeprecatedRateTable.Find(model).IfNone(CostStructure.Simple(0, 0)));
 
     internal static ChatCost CalcCost(CostStructure rate, ChatTokenUsage usage, BinaryData? rawResponse = null) {
         // OpenAI includes reasoning in output; retain it once, in Other, at its configured rate.
